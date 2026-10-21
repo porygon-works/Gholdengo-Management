@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { addDays, addMonths, balanceAfterDebits, budgetCats, computeMonth, debitLines, debitsFor, dipBefore, nextMonthDebits, RESERVE, type CardDebit, type DebitLine } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { Bar, Chip, Field, fromPayKey, md, NumInput, payKeys, payLabels, QUICK_METHODS, Select, signed, toast, yen } from "./common";
@@ -162,10 +162,10 @@ function AccountFlow({ data, today, go }: { data: AppData; today: string; go: Pr
   return (
     <>
       <div className="cards">
-        <div className="kpi">
-          <div className="lb">いまの残高</div>
-          <div className="v num">{yen(x.now)}<small>円</small></div>
-          <div className="note">{md(x.bal.date)}に報告・口座＋現金</div>
+        <div className="kpi tap" onClick={() => go("balance")} style={{ cursor: "pointer" }}>
+          <div className="lb">口座残高（いま）</div>
+          <div className="v num">{yen(x.now.bank)}<small>円</small></div>
+          <div className="note">財布 {yen(x.now.cash)}円・タップで直す</div>
         </div>
         <div className={`kpi ${x.beforePayday < 0 ? "bad" : "main"}`}>
           <div className="lb">給料日の前日（{md(pd)}）に残る額</div>
@@ -175,17 +175,29 @@ function AccountFlow({ data, today, go }: { data: AppData; today: string; go: Pr
       </div>
       <div className="panel scroll">
         <table className="tbl">
+          <thead><tr><th>日</th><th style={{ textAlign: "left" }}>内容</th><th>入出金</th><th>残高</th></tr></thead>
           <tbody>
-            <tr><td>いまの残高</td><td className="num">{yen(x.now)}</td></tr>
-            <tr><td>− 今月これからの引き落とし</td><td className="num">{yen(x.thisMonth)}</td></tr>
-            <tr className="sum"><td><b>＝ 引き落としのあとに残る額</b></td><td className={neg(x.afterThisMonth)}><b>{signed(x.afterThisMonth)}</b></td></tr>
-            {x.nextBeforePay > 0 && <tr><td>− 来月1日〜{md(pd)}の引き落とし（{x.untilPay.filter((l) => l.date.slice(0, 7) !== today.slice(0, 7)).map((l) => l.label).join("・")}）</td><td className="num">{yen(x.nextBeforePay)}</td></tr>}
-            <tr className="sum"><td><b>＝ 給料日の前日に残る額</b></td><td className={neg(x.beforePayday)}><b>{signed(x.beforePayday)}</b></td></tr>
+            <tr><td className="num">{md(today)}</td><td style={{ textAlign: "left" }}>口座残高（いま）</td><td /><td className="num">{yen(x.now.bank)}</td></tr>
+            {x.rows.map((r, i) => {
+              const monthEnd = r.date.slice(0, 7) === today.slice(0, 7) && x.rows[i + 1]?.date.slice(0, 7) !== today.slice(0, 7);
+              return (
+                <Fragment key={i}>
+                  <tr>
+                    <td className="num">{md(r.date)}</td>
+                    <td style={{ textAlign: "left" }}>{r.label}{r.state !== "確定" && <> <Chip kind="warn">{r.state}</Chip></>}</td>
+                    <td className={`num ${r.delta < 0 ? "neg" : ""}`}>{r.delta > 0 ? "＋" : "−"}{yen(Math.abs(r.delta))}</td>
+                    <td className={neg(r.balance)}>{signed(r.balance)}</td>
+                  </tr>
+                  {monthEnd && <tr className="sum"><td /><td style={{ textAlign: "left" }}><b>今月の引き落としのあと</b></td><td /><td className={neg(x.afterThisMonth)}><b>{signed(x.afterThisMonth)}</b></td></tr>}
+                </Fragment>
+              );
+            })}
           </tbody>
+          <tfoot><tr><td className="num">{md(pd)}</td><td style={{ textAlign: "left" }}>給料日の前日に残る額</td><td /><td className={neg(x.beforePayday)}>{signed(x.beforePayday)}</td></tr></tfoot>
         </table>
-        <div className="note">給与などの入金と、現金・PayPay で使う分は入れていません。</div>
+        <div className="note">給与は給料日に入るので入れていません。現金で使う分は口座が動かないので入っていません。カードで使った分は引落日に減ります。</div>
         <div className="btns">
-          <button className="btn ghost sm" onClick={() => go("balance")}>今の残高を入れる</button>
+          <button className="btn ghost sm" onClick={() => go("balance")}>残高を直す・ATM</button>
           <button className="btn ghost sm" onClick={() => go("passbook")}>口座の見通し</button>
         </div>
       </div>

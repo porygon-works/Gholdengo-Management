@@ -17,23 +17,34 @@ export function closingMonth(d: string, s: Settings, card?: string | null): stri
 }
 
 /**
- * 資産から減る（または増える）日。null は資産が動かないもの。
+ * 口座から減る（または口座に入る）日。null は口座が動かないもの。
  * - クレカ：そのカードの締め月の引落日。ただし「返済」はその日に請求される額なので、使った日そのもの
- * - 現金・PayPay・交通系・口座：その日
- * - ポイント・リボで買った物：資産は動かない（リボは返済の明細で数える）
+ * - 口座・PayPay（口座からチャージ）：その日
+ * - 現金・交通系（現金でチャージ）：口座は動かない（財布が動く。walletDelta）
+ * - ATMで引き出し（移動・金種「口座」）：その日に口座から出る
+ * - ポイント・リボで買った物：口座は動かない（リボは返済の明細で数える）
  */
 export function cashDate(e: Entry, s: Settings): string | null {
-  if (e.kind === "transfer") return null;
-  if (e.kind === "income") return e.date;
+  if (e.kind === "transfer") return e.method === "bank" ? e.date : null;
+  if (e.kind === "income") return e.method === "cash" ? null : e.date;
   switch (e.method) {
     case "point":
     case "revo":
+    case "cash":
+    case "ic":
       return null;
     case "card":
       return e.category === REPAY ? e.date : cardPayDate(closingMonth(e.date, s, e.card), s, e.card);
     default:
       return e.date;
   }
+}
+
+/** 財布（現金）の増減。現金で使った・現金で受け取った・ATMで引き出した */
+export function walletDelta(e: Entry): number {
+  if (e.kind === "transfer") return e.method === "bank" ? e.amount : 0;
+  if (e.kind === "income") return e.method === "cash" ? e.amount : 0;
+  return e.method === "cash" || e.method === "ic" ? -e.amount : 0;
 }
 
 /** 予算に数える額（立替を除く） */

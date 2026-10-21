@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  assetAt, budgetsFor, cardPayDate, debitsFor, nextMonthDebits, nextPayday, balanceAfterDebits, cashLimit, dipBefore, goalPlan, monthBase, monthlyFor, planGoals, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
+  assetAt, budgetsFor, cardPayDate, debitsFor, nextMonthDebits, nextPayday, balanceAfterDebits, accountNow, walletDelta, cashLimit, dipBefore, goalPlan, monthBase, monthlyFor, planGoals, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
   isBusinessDay, missingRecurring, normalizeShop, projection, recurringDate, ruleFor, shiftBusiness, type Data, type Entry, type Recurring,
 } from "./index";
 
@@ -33,15 +33,19 @@ describe("日付と祝日", () => {
   });
 });
 
-describe("資産から減る日", () => {
-  it("金種ごと", () => {
+describe("口座から減る日", () => {
+  it("金種ごと（現金・交通系は財布が動き、口座は動かない）", () => {
     expect(cashDate(E({ method: "card", date: "2026-10-31" }), S)).toBe("2026-11-26");
-    expect(cashDate(E({ method: "cash" }), S)).toBe("2026-10-10");
+    expect(cashDate(E({ method: "cash" }), S)).toBeNull();
+    expect(cashDate(E({ method: "ic" }), S)).toBeNull();
+    expect(cashDate(E({ kind: "income", method: "cash" }), S)).toBeNull();
+    expect(cashDate(E({ kind: "income", method: "bank" }), S)).toBe("2026-10-10");
     expect(cashDate(E({ method: "paypay" }), S)).toBe("2026-10-10");
     expect(cashDate(E({ method: "point" }), S)).toBeNull();
     expect(cashDate(E({ method: "revo" }), S)).toBeNull();
     expect(cashDate(E({ method: "card", category: "返済", date: "2026-10-26" }), S)).toBe("2026-10-26");
-    expect(cashDate(E({ kind: "transfer", method: "bank" }), S)).toBeNull();
+    expect(cashDate(E({ kind: "transfer", method: "bank" }), S)).toBe("2026-10-10"); // ATMで引き出し
+    expect([walletDelta(E({ method: "cash", amount: 500 })), walletDelta(E({ kind: "transfer", method: "bank", amount: 10000 })), walletDelta(E({ method: "card" }))]).toEqual([-500, 10000, 0]);
   });
 });
 
@@ -148,15 +152,16 @@ describe("口座の見通し（足りなくなる日の警告に使う）", () =
     const d = D({
       balances: [base],
       entries: [
-        E({ method: "cash", amount: 1000, date: "2026-10-18" }), // 報告より前 → 残高に入っている
-        E({ method: "cash", amount: 2000, date: "2026-10-20" }),
+        E({ method: "bank", amount: 1000, date: "2026-10-18" }), // 報告より前 → 残高に入っている
+        E({ method: "paypay", amount: 2000, date: "2026-10-20" }),
+        E({ method: "cash", amount: 700, date: "2026-10-20" }), // 現金は口座が動かない
         E({ method: "card", amount: 50000, date: "2026-10-05" }), // 11/26 に引落
         E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-11-16", category: null }),
       ],
     });
     const p = projection(d, today)!;
-    expect(assetAt(p, "2026-10-20")).toBe(303000);
-    expect(assetAt(p, "2026-11-26")).toBe(303000 + 250000 - 50000);
+    expect(assetAt(p, "2026-10-20")).toBe(298000);
+    expect(assetAt(p, "2026-11-26")).toBe(298000 + 250000 - 50000);
   });
   it("残高の報告日より前の日付の予定は、残高に入っているものとして数えない（月の途中で作った給与の予定など）", () => {
     const d = D({
@@ -172,12 +177,12 @@ describe("口座の見通し（足りなくなる日の警告に使う）", () =
   });
   it("引落日より前に安全残高を下回る日があれば知らせる", () => {
     const d = D({ balances: [base], entries: [E({ kind: "expense", method: "bank", category: "固定引落", amount: 400000, date: "2026-11-04" })] });
-    expect(dipBefore(d, today)).toEqual({ value: -95000, date: "2026-11-04" });
+    expect(dipBefore(d, today)).toEqual({ value: -100000, date: "2026-11-04" });
     expect(dipBefore(D({ balances: [base] }), today)).toBeNull();
   });
-  it("現金はすぐ口座から出るので、今日からいちばん少ない日で上限を出す", () => {
+  it("口座払い・PayPay はすぐ口座から出るので、今日からいちばん少ない日で上限を出す", () => {
     const d = D({ balances: [base], settings: { ...S, safety: 10000 }, entries: [E({ kind: "expense", method: "bank", category: "固定引落", amount: 230000, date: "2026-10-27" })] });
-    expect(cashLimit(d, today)).toEqual({ value: 65000, date: "2026-10-27" });
+    expect(cashLimit(d, today)).toEqual({ value: 60000, date: "2026-10-27" });
   });
   it("カード請求額が分かっていれば、その日のクレカ明細の代わりに請求額で数える", () => {
     const d = D({
@@ -186,19 +191,19 @@ describe("口座の見通し（足りなくなる日の警告に使う）", () =
       entries: [E({ method: "card", amount: 200000, date: "2026-09-20" })],
     });
     const p = projection(d, today)!;
-    expect(assetAt(p, "2026-10-26")).toBe(305000 - 123456);
+    expect(assetAt(p, "2026-10-26")).toBe(300000 - 123456);
   });
   it("立替・予算外も口座からは出る。リボで買った物は出ない（返済で出る）", () => {
     const d = D({
       balances: [base],
       entries: [E({ amount: 88000, tatekae: 82500, category: "外食" }), E({ amount: 50000, category: "予算外" }), E({ amount: 30000, method: "revo", category: "日用品・通販" })],
     });
-    expect(assetAt(projection(d, today)!, "2026-11-26")).toBe(305000 - 88000 - 50000);
+    expect(assetAt(projection(d, today)!, "2026-11-26")).toBe(300000 - 88000 - 50000);
   });
   it("先の月の見通しは、前の月の分をその月の引落日に使ったものとして続けて計算する", () => {
     const inc = (date: string) => E({ kind: "income", status: "plan", method: "bank", amount: 250000, date, category: null });
     const fc = forecast(D({ balances: [base], entries: [inc("2026-11-16"), inc("2026-12-15"), inc("2027-01-15")] }), today, 2)!;
-    expect(fc.map((f) => f.R)).toEqual([555000, 250000, 250000]);
+    expect(fc.map((f) => f.R)).toEqual([550000, 250000, 250000]);
   });
 });
 
@@ -419,21 +424,47 @@ describe("カード2枚と引き落とし", () => {
     expect([n.cardFixed, n.directFixed, n.cardVar, n.repay, n.other]).toEqual([70000, 30000, 7000, 10000, 0]);
     expect(n.total).toBe(117000);
   });
-  it("口座の今後の動き：今月これからの引き落としと、次の給料日の前日に残る額", () => {
+  it("いまの口座と財布：報告のあと今日までに起きたこと（予定は除く）を足し引きする", () => {
+    const d = D({
+      balances: [{ id: "b", date: "2026-10-19", bank: 300000, cash: 10000, paypay: 0, memo: "" }],
+      entries: [
+        E({ kind: "income", method: "bank", category: null, item: "売却代金", amount: 40000, date: "2026-10-20" }),
+        E({ kind: "transfer", method: "bank", category: null, item: "ATMで引き出し", amount: 20000, date: "2026-10-20" }),
+        E({ method: "cash", amount: 3000, date: "2026-10-21" }),
+        E({ method: "card", amount: 9000, date: "2026-10-21" }), // 口座は引落日まで動かない
+        E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-10-21", status: "plan" }), // 予定のまま
+      ],
+    });
+    const x = accountNow(d, "2026-10-21")!;
+    expect([x.bank, x.cash]).toEqual([300000 + 40000 - 20000, 10000 + 20000 - 3000]);
+    expect(x.rows.map((r) => r.label)).toEqual(["売却代金（入金）", "ATMで引き出し"]);
+    // 残高を直した日と同じ日の明細は、直したあとに入れたものだけ数える
+    const fixed = { ...d, balances: [{ id: "c", date: "2026-10-21", bank: 400000, cash: 5000, paypay: 0, memo: "", at: "2026-10-21T03:00:00Z" }] };
+    const atm = (at: string) => E({ kind: "transfer", method: "bank", category: null, amount: 10000, date: "2026-10-21", at });
+    const y = accountNow({ ...fixed, entries: [atm("2026-10-21T02:00:00Z"), atm("2026-10-21T04:00:00Z")] }, "2026-10-21")!;
+    expect([y.bank, y.cash]).toEqual([390000, 15000]);
+  });
+  it("口座の今後の動き：いまの口座から、給料日の前日までの入金と引き落としを1件ずつ（カードは請求1行）", () => {
     const d = D({
       balances: [{ id: "b", date: "2026-10-19", bank: 300000, cash: 10000, paypay: 0, memo: "" }],
       entries: [
         E({ method: "card", amount: 50000, date: "2026-09-10" }),
+        E({ method: "card", amount: 5000, date: "2026-09-12" }),
         E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-10-27", status: "plan" }),
-        E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-10-10" }),
         E({ method: "card", card: "saison", category: "家賃", amount: 70000, date: "2026-10-27", status: "plan" }),
         E({ method: "bank", category: "保険・共済", amount: 2000, date: "2026-11-20", status: "plan" }),
+        E({ kind: "income", method: "bank", category: null, item: "売却代金", amount: 40000, date: "2026-10-20" }),
+        E({ kind: "income", method: "bank", category: "給与", item: "給与", amount: 250000, date: "2026-11-16", status: "plan" }),
       ],
     });
     expect(nextPayday(S, "2026-10-21")).toBe("2026-11-16");
     expect(nextPayday(S, "2026-10-14")).toBe("2026-10-15");
     const x = balanceAfterDebits(d, "2026-10-21")!;
-    expect([x.now, x.thisMonth, x.afterThisMonth]).toEqual([310000, 80000, 230000]);
-    expect([x.nextBeforePay, x.beforePayday]).toEqual([70000, 160000]);
+    expect([x.now.bank, x.afterThisMonth, x.beforePayday]).toEqual([340000, 255000, 185000]);
+    expect(x.rows.map((r) => [r.date, r.label, r.delta, r.balance])).toEqual([
+      ["2026-10-26", "三井のクレカの請求（9月分）", -55000, 285000],
+      ["2026-10-27", "奨学金", -30000, 255000],
+      ["2026-11-04", "セゾンのクレカの請求（10月分）", -70000, 185000],
+    ]);
   });
 });

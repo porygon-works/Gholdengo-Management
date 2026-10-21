@@ -1,6 +1,6 @@
 import { addDays, addMonths, dayOf, daysBetween, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardOf, cardPayDate, cashDate, closingMonth, ownCost } from "./schedule";
+import { cardOf, cardPayDate, cashDate, closingMonth, ownCost, walletDelta } from "./schedule";
 import { BASE_KEYS, budgetCats, INCOME_EXTRA, INCOME_SALARY, isFixedCat, nonBudgetCats, REPAY, RESERVE, type Balance, type BaseField, type BaseKey, type CardDef, type Data, type Entry, type Settings } from "./types";
 
 // 仕様書 §5 の計算式
@@ -13,13 +13,18 @@ export function budgetCat(e: Entry, s: Settings): string | null {
   return budgetCats(s).includes(e.category) ? e.category : RESERVE;
 }
 
+/** いちばん新しい残高の報告（同じ日なら、あとから入れたもの） */
 export function latestBalance(balances: Balance[]): Balance | null {
   let best: Balance | null = null;
-  for (const b of balances) if (!best || b.date > best.date) best = b;
+  for (const b of balances) if (!best || b.date > best.date || (b.date === best.date && (b.at ?? "") >= (best.at ?? ""))) best = b;
   return best;
 }
 
-export const balanceTotal = (b: Balance) => (b.bank || 0) + (b.cash || 0) + (b.paypay || 0);
+/** 見通しに使う残高は口座だけ（財布は別に数える） */
+export const balanceTotal = (b: Balance) => b.bank || 0;
+
+/** 残高の報告 base のあとに起きたことか。同じ日なら、報告のあとに入れたもの */
+const afterBase = (date: string, e: Entry, base: Balance) => date > base.date || (date === base.date && e.date === date && !!e.at && !!base.at && e.at > base.at);
 
 export interface AssetEvent {
   date: string;
@@ -27,6 +32,7 @@ export interface AssetEvent {
   label: string;
   entry?: Entry;
   bill?: boolean;
+  card?: string; // 請求額の行のカード
   cardSum?: number; // 請求額で置きかえたときの、その日のクレカ明細の合計
 }
 
@@ -48,11 +54,12 @@ export function projection(d: Data, today: string): Projection | null {
     if (!cd) continue;
     // 残高の報告日までに資産が動くはずだった分は、起きていれば報告した残高に入っている。二重に数えない
     // （予定のまま残っていても、画面には「日付が過ぎた予定」として出るので、本人が確定か削除をする）
-    if (cd <= base.date) continue;
+    // 報告と同じ日のものは、報告のあとに入れたものだけ数える（残高を直したあとで ATM や口座払いを入れたとき）
+    if (!afterBase(cd, e, base)) continue;
     // 報告日より後で、まだ起きていない予定は、遅れていても今日以降に起きるものとして数える
     if (e.status === "plan" && cd < soon) cd = soon;
-    const label = e.item || e.shop || (e.kind === "income" ? "入金" : "支出");
-    events.push({ date: cd, delta: e.kind === "income" ? e.amount : -e.amount, label, entry: e });
+    const label = e.item || e.shop || e.category || (e.kind === "income" ? "入金" : "支出");
+    events.push({ date: cd, delta: e.kind === "income" ? e.amount : -e.amount, label: e.kind === "transfer" ? "ATMで引き出し" : label, entry: e });
   }
   // カード請求額が分かっている引落日は、明細の合計の代わりに請求額で数える
   for (const b of d.cardBills) {
@@ -62,7 +69,7 @@ export function projection(d: Data, today: string): Projection | null {
       const ev = events[i];
       if (ev.date === b.pay_date && ev.entry?.method === "card" && ev.entry.kind === "expense" && cardOf(s, ev.entry.card).id === cardOf(s, b.card).id) { cardSum -= ev.delta; events.splice(i, 1); }
     }
-    events.push({ date: b.pay_date, delta: -b.amount, label: `${cardOf(s, b.card).name}の引落（請求額）`, bill: true, cardSum });
+    events.push({ date: b.pay_date, delta: -b.amount, label: `${cardOf(s, b.card).name}の引落（請求額）`, bill: true, card: cardOf(s, b.card).id, cardSum });
   }
   const isCard = (e: AssetEvent) => (e.entry?.method === "card" ? 1 : 0);
   events.sort((a, b) => a.date.localeCompare(b.date) || Math.sign(b.delta) - Math.sign(a.delta) || isCard(a) - isCard(b));
@@ -531,23 +538,69 @@ export function nextPayday(s: Settings, today: string): string {
   return p > today ? p : shiftBusiness(dayOf(addMonths(ym, 1), s.payday), "next");
 }
 
+export interface FlowRow { date: string; label: string; delta: number; balance: number; state: "予定" | "見込み" | "確定" }
+
+/** 口座の出来事を表の行にする。同じ日の同じカードの明細は「〇〇のクレカの請求」1行にまとめる */
+function flowRows(d: Data, events: AssetEvent[], start: number): FlowRow[] {
+  const s = d.settings;
+  const rows: Omit<FlowRow, "balance">[] = [];
+  const cardRow = new Map<string, Omit<FlowRow, "balance">>();
+  for (const ev of events) {
+    const e = ev.entry;
+    if (e && e.method === "card" && e.kind === "expense") {
+      const c = cardOf(s, e.card);
+      const key = `${ev.date}:${c.id}`;
+      const hit = cardRow.get(key);
+      if (hit) { hit.delta += ev.delta; continue; }
+      const closing = e.category === REPAY ? addMonths(ymOf(ev.date), -c.payMonths) : closingMonth(e.date, s, c.id);
+      const row = { date: ev.date, label: `${c.name}のクレカの請求（${+closing.slice(5)}月分）`, delta: ev.delta, state: "見込み" as const };
+      cardRow.set(key, row); rows.push(row);
+      continue;
+    }
+    if (ev.bill) {
+      const c = cardOf(s, ev.card);
+      rows.push({ date: ev.date, label: `${c.name}のクレカの請求（${+addMonths(ymOf(ev.date), -c.payMonths).slice(5)}月分）`, delta: ev.delta, state: "確定" });
+      continue;
+    }
+    rows.push({ date: ev.date, label: e?.kind === "income" ? `${ev.label}（入金）` : ev.label, delta: ev.delta, state: e?.status === "plan" ? "予定" : "確定" });
+  }
+  let v = start;
+  return rows.map((r) => ({ ...r, balance: (v += r.delta) }));
+}
+
 /**
- * いまの口座残高から、引き落としを引いて残る額（§5.9）。
- * - 今月の引き落としのうち、残高の報告日より後のもの
- * - 次の給料日の前日までの引き落とし（来月の家賃なども入る）
- * 給与などの入金と、現金・PayPay で使う分は入れない
+ * いまの口座と財布（§5.9）。最後に入れた残高に、そのあと今日までに起きたこと（予定のままのものは除く）を足し引きする。
+ * 口座：入金・口座払い・PayPayチャージ・ATMで引き出し・引落日が来たカードの請求。財布：現金で使った・受け取った・ATMで引き出した
+ */
+export function accountNow(d: Data, today: string) {
+  const p = projection(d, today);
+  if (!p) return null;
+  const base = p.base;
+  const done = p.events.filter((ev) => ev.date <= today && ev.entry?.status !== "plan");
+  const rows = flowRows(d, done, base.bank || 0);
+  const bank = rows.length ? rows[rows.length - 1].balance : base.bank || 0;
+  const cash = d.entries.filter((e) => isLive(e) && e.status !== "plan" && afterBase(e.date, e, base) && e.date <= today).reduce((a, e) => a + walletDelta(e), base.cash || 0);
+  return { base, rows, bank, cash };
+}
+
+/**
+ * 口座の今後の動き（§5.9）。いまの口座残高から、明日〜次の給料日の前日（今月中は月末まで）の入金と引き落としを日付の順に並べる。
+ * - カードは引落日ごとに1行（請求額。リボ・分割の返済を含む）
+ * - 給与は給料日に入るので、ここには入らない。現金で使う分は口座が動かないので入れない
  */
 export function balanceAfterDebits(d: Data, today: string) {
-  const bal = latestBalance(d.balances);
-  if (!bal) return null;
-  const now = balanceTotal(bal);
+  const p = projection(d, today);
+  const now = accountNow(d, today);
+  if (!p || !now) return null;
   const payday = nextPayday(d.settings, today);
   const cur = ymOf(today);
-  const lines = [...debitLines(debitsFor(d, cur)), ...debitLines(debitsFor(d, addMonths(cur, 1)))].filter((l) => l.date > bal.date);
-  const thisMonth = lines.filter((l) => ymOf(l.date) === cur).reduce((a, l) => a + l.amount, 0);
-  const untilPay = lines.filter((l) => l.date < payday);
-  const beforePay = untilPay.reduce((a, l) => a + l.amount, 0);
-  // 来月に入ってから給料日の前日までの分（来月の家賃など）
-  const nextBeforePay = untilPay.filter((l) => ymOf(l.date) !== cur).reduce((a, l) => a + l.amount, 0);
-  return { bal, now, thisMonth, afterThisMonth: now - thisMonth, payday, untilPay, nextBeforePay, beforePayday: now - beforePay };
+  // 日付が過ぎたのに予定のままのものは、今日起きるものとして数える（projection が今日に寄せている）
+  const ahead = p.events.filter((ev) => (ev.date > today || (ev.date === today && ev.entry?.status === "plan")) && (ymOf(ev.date) === cur || ev.date < payday));
+  const rows = flowRows(d, ahead, now.bank);
+  const until = (pred: (r: FlowRow) => boolean) => rows.filter(pred).reduce((a, r) => a + r.delta, now.bank);
+  return {
+    now, payday, rows,
+    afterThisMonth: until((r) => ymOf(r.date) === cur),
+    beforePayday: until((r) => r.date < payday),
+  };
 }

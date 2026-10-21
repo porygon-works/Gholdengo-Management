@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { addMonths, balanceTotal, cardPayDate, forecast, latestBalance, monthBase, passbook, paydayChecks, ymOf } from "../engine";
+import { accountNow, addMonths, balanceTotal, cardPayDate, forecast, monthBase, passbook, paydayChecks, ymOf } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
-import { Chip, Empty, Field, md, NumInput, Sheet, signed, toast, yen, ymLabel } from "./common";
+import { Chip, Empty, Field, md, NumInput, Sheet, signed, toast, yen } from "./common";
 
 export function Goals({ data, today }: { data: AppData; today: string }) {
   const s = data.settings;
@@ -88,29 +88,69 @@ export function Passbook({ data, today }: { data: AppData; today: string }) {
 }
 
 export function BalanceSheet({ store, data, today, onClose }: { store: Store; data: AppData; today: string; onClose: () => void }) {
-  const last = latestBalance(data.balances);
-  const [date, setDate] = useState(today);
+  const now = accountNow(data, today);
+  const cur = { bank: now?.bank ?? 0, cash: now?.cash ?? 0 };
   const [bank, setBank] = useState<number | "">("");
-  const [cash, setCash] = useState<number | "">(last?.cash ?? "");
-  const save = async () => {
-    if (bank === "") { toast("口座の残高を入れてください"); return; }
-    if (await store.run(() => actions.addBalance({ date, bank, cash: cash || 0, paypay: 0, memo: "" }))) { toast("残高を更新しました"); onClose(); }
+  const [cash, setCash] = useState<number | "">("");
+  const [atm, setAtm] = useState<number | "">("");
+  const [atmDate, setAtmDate] = useState(today);
+  const fix = async (which: "bank" | "cash", v: number | "") => {
+    if (v === "") { toast("本当の残高を入れてください"); return; }
+    if (await store.run(() => actions.fixBalance(today, cur, which, v))) { toast(which === "bank" ? "口座の残高を直しました" : "財布の残高を直しました"); which === "bank" ? setBank("") : setCash(""); }
   };
-  const hist = [...data.balances].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+  const addAtm = async () => {
+    if (!atm) { toast("引き出した額を入れてください"); return; }
+    if (await store.run(() => actions.addAtm(atmDate, atm))) { toast(`口座から財布へ ${yen(atm)}円`); setAtm(""); }
+  };
+  const hist = [...data.balances].sort((a, b) => b.date.localeCompare(a.date) || (b.at ?? "").localeCompare(a.at ?? "")).slice(0, 10);
   return (
-    <Sheet title="今の残高を入れる" onClose={onClose}>
-      <Field label="日付" hint="この日の終わりの残高として扱います"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-      <Field label="口座"><NumInput value={bank} onChange={setBank} autoFocus /></Field>
-      <Field label="現金（財布）"><NumInput value={cash} onChange={setCash} /></Field>
-      <div className="note">PayPay と交通系は、チャージしたときに使ったものとして数えるので、残高は入れません。</div>
-      <div className="btns"><button className="btn" onClick={save}>保存</button><button className="btn ghost" onClick={onClose}>やめる</button></div>
-      {hist.length > 0 && (
-        <table className="tbl"><tbody>{hist.map((b) => (
-          <tr key={b.id}><td>{md(b.date)}</td><td className="num">口座 {yen(b.bank)}</td><td className="num">計 {yen(balanceTotal(b))}</td>
-            <td><button className="btn sm danger" onClick={async () => { if (confirm("この報告を消しますか？")) await store.run(() => actions.deleteBalance(b.id)); }}>消す</button></td></tr>
-        ))}</tbody></table>
+    <Sheet title="口座と財布" onClose={onClose}>
+      <div className="cards">
+        <div className="kpi"><div className="lb">口座（いま）</div><div className="v num">{now ? yen(cur.bank) : "―"}<small>円</small></div></div>
+        <div className="kpi"><div className="lb">財布（いま）</div><div className="v num">{now ? yen(cur.cash) : "―"}<small>円</small></div></div>
+      </div>
+      <div className="note">{now ? `${md(now.base.date)}に入れた残高に、そのあとの入金・口座払い・引き落とし・現金で使ったものなどを足し引きした額です。クレカで使ったものは、引落日に口座から減ります。` : "まだ残高がありません。下で入れてください。"}</div>
+
+      <h2>残高を直す <small>通帳やアプリを見て、本当の額を入れる</small></h2>
+      <div className="grid2">
+        <Field label="口座の本当の残高"><NumInput value={bank} onChange={setBank} /></Field>
+        <div className="btns"><button className="btn sm" onClick={() => fix("bank", bank)}>口座を直す</button></div>
+        <Field label="財布の本当の残高"><NumInput value={cash} onChange={setCash} /></Field>
+        <div className="btns"><button className="btn sm" onClick={() => fix("cash", cash)}>財布を直す</button></div>
+      </div>
+
+      <h2>ATMで引き出した <small>口座が減り、財布が増える</small></h2>
+      <div className="grid2">
+        <Field label="日付"><input type="date" value={atmDate} onChange={(e) => setAtmDate(e.target.value)} /></Field>
+        <Field label="額"><NumInput value={atm} onChange={setAtm} /></Field>
+      </div>
+      <div className="btns"><button className="btn sm" onClick={addAtm}>入れる</button></div>
+
+      {now && now.rows.length > 0 && (
+        <>
+          <h2>{md(now.base.date)}に入れてからの口座の動き</h2>
+          <table className="tbl">
+            <tbody>
+              <tr><td className="num">{md(now.base.date)}</td><td style={{ textAlign: "left" }}>入れた残高</td><td /><td className="num">{yen(now.base.bank)}</td></tr>
+              {now.rows.map((r, i) => <tr key={i}><td className="num">{md(r.date)}</td><td style={{ textAlign: "left" }}>{r.label}</td><td className={`num ${r.delta < 0 ? "neg" : ""}`}>{r.delta > 0 ? "＋" : "−"}{yen(Math.abs(r.delta))}</td><td className="num">{signed(r.balance)}</td></tr>)}
+            </tbody>
+          </table>
+        </>
       )}
-      <div className="note">{ymLabel(ymOf(today))}：給料日など、口座を見たときに入れてください。</div>
+
+      {hist.length > 0 && (
+        <>
+          <h2>残高を入れた・直した履歴</h2>
+          <table className="tbl"><tbody>{hist.map((b) => (
+            <tr key={b.id}>
+              <td className="num">{md(b.date)}</td>
+              <td style={{ textAlign: "left" }}>口座 {yen(b.bank)}・財布 {yen(b.cash)}{b.memo && <div className="note">{b.memo}</div>}</td>
+              <td><button className="btn sm danger" onClick={async () => { if (confirm("この記録を消しますか？")) await store.run(() => actions.deleteBalance(b.id)); }}>消す</button></td>
+            </tr>
+          ))}</tbody></table>
+        </>
+      )}
+      <div className="btns"><button className="btn ghost" onClick={onClose}>閉じる</button></div>
     </Sheet>
   );
 }
