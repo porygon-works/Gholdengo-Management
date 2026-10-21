@@ -1,6 +1,6 @@
 import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost } from "./schedule";
+import { cardOf, cardPayDate, closingFor, closingMonth, ownCost } from "./schedule";
 import {
   budgetCats, GOAL_KEY, isFixedCat, RESERVE,
   type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
@@ -60,7 +60,8 @@ export function billsFor(d: Data, payYm: string): Bill[] {
   return s.cards.map((c) => {
     const closingYm = closingFor(payYm, s, c.id);
     const date = cardPayDate(closingYm, s, c.id);
-    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && cardOf(s, e.card).id === c.id && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
+    // 分割（返済）は引落日の日付で持つので、引落月で入れる。ほかは利用日の締め月で入れる
+    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && cardOf(s, e.card).id === c.id && (e.group === "installment" ? ymOf(e.date) === payYm : closingMonth(e.date, s, c.id) === closingYm)).sort((a, b) => a.date.localeCompare(b.date));
     const estimate = items.reduce((a, e) => a + e.amount, 0);
     const row = d.accounts.find((e) => e.source_ref === billRef(c.id, date)) ?? null;
     const amount = row && (row.status === "confirmed" || row.locked) ? row.amount : estimate;
@@ -163,8 +164,8 @@ export const lumpRef = (g: Goal, date: string) => `goal:${g.id}:lump:${date}`;
 
 /**
  * 返済の目標から、まだ作っていない返済の予定を作る（§3.4）。
- * カードがあればクレカ明細（分割（返済））、なければ口座明細の出金。臨時の返済は口座明細の出金。
- * 同じカードの同じ締め月に分割（返済）の明細がもうあれば（定期のお金や前の版から来たもの）、作らない
+ * カードがあればクレカ明細（分割（返済）。日付は引落日）、なければ口座明細の出金。臨時の返済は口座明細の出金。
+ * 同じカードの同じ引落月に分割（返済）の明細がもうあれば（定期のお金や前の版から来たもの）、作らない
  */
 export function missingGoalPlans(d: Data, months: string[]) {
   const s = d.settings;
@@ -178,9 +179,8 @@ export function missingGoalPlans(d: Data, months: string[]) {
       if (m.pay > 0 && !have.has(goalRef(g, m.ym))) {
         if (g.card) {
           const c = cardOf(s, g.card).id;
-          const cym = closingFor(m.ym, s, c);
-          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && closingMonth(e.date, s, c) === cym && (!e.goal_id || e.goal_id === g.id));
-          if (!dup) cards.push({ card: c, status: "plan", date: closingEnd(cym, s, c), amount: m.pay, group: "installment", category: null, name: `${g.name}の返済`, shop: "", memo: "", tatekae: 0, source: "goal", source_ref: goalRef(g, m.ym), merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: g.id });
+          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && ymOf(e.date) === m.ym && (!e.goal_id || e.goal_id === g.id));
+          if (!dup) cards.push({ card: c, status: "plan", date: goalPayDate(g, m.ym, s), amount: m.pay, group: "installment", category: null, name: `${g.name}の返済`, shop: "", memo: "", tatekae: 0, source: "goal", source_ref: goalRef(g, m.ym), merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: g.id });
         } else {
           accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}の返済`, memo: "", date: goalPayDate(g, m.ym, s), amount: m.pay, source: "goal", source_ref: goalRef(g, m.ym), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
         }

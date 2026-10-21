@@ -115,7 +115,7 @@ describe("クレカの請求（口座明細のクレカ支払い）", () => {
       C({ amount: 40000, date: "2026-10-12", group: "purchase", category: null }), // 分割（購入）は請求に入らない
       C({ amount: 8000, date: "2026-10-20", group: "tatekae", category: null }),
       C({ card: "saison", amount: 70000, date: "2026-10-27", group: "fixed", category: "家賃" }),
-      C({ card: "saison", amount: 10000, date: "2026-10-31", group: "installment", category: null, status: "plan" }),
+      C({ card: "saison", amount: 10000, date: "2026-11-04", group: "installment", category: null, status: "plan" }), // 分割（返済）は引落日の日付
     ],
   });
   it("見込み＝締め期間のクレカ明細（予定・立替を含む。分割（購入）を除く）", () => {
@@ -199,12 +199,12 @@ describe("目標マスタ", () => {
     const d = D({ goals: [save, G({ balance: 30000, monthly: 10000, card: "saison" })] });
     expect([goalMinusAuto(d, "2026-11"), goalMinusAuto(d, "2027-01")]).toEqual([10000, 30000]);
   });
-  it("返済の予定を作る：カードなら締め月の最後の日の分割（返済）、臨時は口座の出金。もう同じ締め月にあれば作らない", () => {
+  it("返済の予定を作る：カードなら引落日の分割（返済）、臨時は口座の出金。もう同じ締め月にあれば作らない", () => {
     const g = G({ id: "g1", balance: 25000, monthly: 10000, card: "saison", lumps: [{ date: "2026-12-16", amount: 15000, memo: "賞与から" }] });
     const out = missingGoalPlans(D({ goals: [g] }), ["2026-11", "2026-12"]);
-    expect(out.cards.map((e) => [e.card, e.group, e.date, e.amount])).toEqual([["saison", "installment", "2026-10-31", 10000], ["saison", "installment", "2026-11-30", 10000]]);
+    expect(out.cards.map((e) => [e.card, e.group, e.date, e.amount])).toEqual([["saison", "installment", "2026-11-04", 10000], ["saison", "installment", "2026-12-04", 10000]]);
     expect(out.accounts.map((e) => [e.date, e.amount, e.direction])).toEqual([["2026-12-16", 5000, "out"]]); // 残り 5,000円まで
-    const had = missingGoalPlans(D({ goals: [g], cards: [C({ card: "saison", group: "installment", category: null, date: "2026-10-31", amount: 10000 })] }), ["2026-11"]);
+    const had = missingGoalPlans(D({ goals: [g], cards: [C({ card: "saison", group: "installment", category: null, date: "2026-11-04", amount: 10000 })] }), ["2026-11"]);
     expect(had.cards).toHaveLength(0);
   });
 });
@@ -255,7 +255,7 @@ describe("口座", () => {
     const d = D({
       cards: [
         C({ card: "saison", group: "fixed", category: "家賃", name: "家賃", amount: 70000, date: "2026-10-27", status: "plan" }),
-        C({ card: "saison", group: "installment", category: null, name: "リボの返済", amount: 10000, date: "2026-10-31", status: "plan" }),
+        C({ card: "saison", group: "installment", category: null, name: "リボの返済", amount: 10000, date: "2026-11-04", status: "plan" }),
         C({ amount: 4000, date: "2026-10-10" }),
         C({ amount: 3000, date: "2026-10-30", status: "plan", category: "外食", tatekae: 1000 }),
         C({ group: "tatekae", category: null, amount: 6000, date: "2026-10-15" }),

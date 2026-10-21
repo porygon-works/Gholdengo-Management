@@ -1,4 +1,4 @@
-import { cardOf, closingEnd, closingFor, groupOfCat, type AccountEntry, type AccountGroup, type CardEntry, type CardGroup, type Goal, type Recurring, type Settings } from "../engine";
+import { cardOf, groupOfCat, type AccountEntry, type AccountGroup, type CardEntry, type CardGroup, type Goal, type Recurring, type Settings } from "../engine";
 import type { Row } from "./backend";
 
 // 前の版（v2）の表を、v3 の表の形に変える（docs/SPEC.md §3.8）
@@ -10,12 +10,6 @@ const day = (v: unknown) => str(v).slice(0, 10);
 const REPAY = "返済", OUTSIDE = "予算外", FIXED_DEBIT = "固定引落";
 /** v1 の「固定引落」を、名前から家賃・奨学金・保険・共済に分ける */
 const fixedDebit = (name: string) => (/家賃/.test(name) ? "家賃" : /奨学金/.test(name) ? "奨学金" : /共済|保険/.test(name) ? "保険・共済" : FIXED_DEBIT);
-
-/**
- * v2 の返済は「その日に請求される額」（使った日＝引落日）だった。v3 のクレカ明細は利用日で請求に入るので、
- * その引落日の請求に入る締め期間の最後の日にする
- */
-const repayDate = (payDate: string, s: Settings, card: string) => closingEnd(closingFor(payDate.slice(0, 7), s, card), s, card);
 
 /** v2 の entries の1行を、口座明細かクレカ明細にする。ATM は口座明細2行。ポイント払いは捨てる */
 export function convertEntry(r: Row, s: Settings): { accounts: Omit<AccountEntry, "id">[]; cards: Omit<CardEntry, "id">[] } {
@@ -48,7 +42,7 @@ export function convertEntry(r: Row, s: Settings): { accounts: Omit<AccountEntry
     const group: CardGroup = method === "revo" ? "purchase" : category === REPAY ? "installment" : category === OUTSIDE ? "tatekae" : groupOfCat(s, category);
     const card = cardOf(s, r.card as string | null).id;
     out.cards.push({
-      ...base, card, group, date: group === "installment" ? repayDate(date, s, card) : date, category: group === "variable" || group === "fixed" ? category : null, name: str(r.item), shop: str(r.shop),
+      ...base, card, group, category: group === "variable" || group === "fixed" ? category : null, name: str(r.item), shop: str(r.shop),
       memo: category === OUTSIDE ? [str(r.memo), "予算外"].filter(Boolean).join("・") : str(r.memo), tatekae: num(r.tatekae),
       source: (["card_flash", "card_statement", "recurring"].includes(str(r.source)) ? r.source : "migration") as CardEntry["source"],
       source_ref: ref, merged_into: null, not_dup: [],
@@ -57,7 +51,7 @@ export function convertEntry(r: Row, s: Settings): { accounts: Omit<AccountEntry
   }
   // 名前に「セゾン」とある口座払いの返済は、セゾンの請求と一緒に出る（v2 の版3の決め方）
   if (category === REPAY && /セゾン/.test(name) && s.cards.some((c) => c.id === "saison")) {
-    out.cards.push({ ...base, card: "saison", date: repayDate(date, s, "saison"), group: "installment", category: null, name, shop: "", tatekae: 0, source: accSource === "recurring" ? "recurring" : "migration", source_ref: ref, merged_into: null, not_dup: [] });
+    out.cards.push({ ...base, card: "saison", group: "installment", category: null, name, shop: "", tatekae: 0, source: accSource === "recurring" ? "recurring" : "migration", source_ref: ref, merged_into: null, not_dup: [] });
     return out;
   }
   const group: AccountGroup = category === REPAY || category === OUTSIDE ? "other" : groupOfCat(s, category);
