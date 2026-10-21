@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  assetAt, budgetsFor, cardPayDate, cashLimit, dipBefore, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
+  assetAt, budgetsFor, cardPayDate, cashLimit, dipBefore, goalPlan, monthBase, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
   isBusinessDay, missingRecurring, normalizeShop, projection, recurringDate, ruleFor, shiftBusiness, type Data, type Entry, type Recurring,
 } from "./index";
 
@@ -141,7 +141,7 @@ describe("重複の処理", () => {
   });
 });
 
-describe("使える額の計算", () => {
+describe("口座の見通し（足りなくなる日の警告に使う）", () => {
   const today = "2026-10-20";
   const base = { id: "b", date: "2026-10-19", bank: 300000, cash: 5000, paypay: 0, memo: "" };
   it("予測資産は報告日より後の出来事だけを足し引きする", () => {
@@ -158,27 +158,6 @@ describe("使える額の計算", () => {
     expect(assetAt(p, "2026-10-20")).toBe(303000);
     expect(assetAt(p, "2026-11-26")).toBe(303000 + 250000 - 50000);
   });
-  it("R は、残りをカードで使ったとして、今月分の引落日〜次の引落日に資産が安全残高を下回らない額", () => {
-    const d = D({
-      balances: [base],
-      settings: { ...S, safety: 10000 },
-      entries: [
-        E({ method: "card", amount: 200000, date: "2026-09-20" }), // 10/26 に引落
-        E({ kind: "expense", method: "bank", category: "固定引落", amount: 30000, date: "2026-10-27" }),
-        E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-11-16", category: null }),
-        E({ method: "card", amount: 40000, date: "2026-10-10" }), // 11/26 に引落
-      ],
-    });
-    const v = computeMonth(d, "2026-10", today);
-    // 11/26: 305000-200000-30000+250000-40000=285000。そこから 12/28 まで動きなし
-    expect(v.min).toEqual({ value: 285000, date: "2026-11-26" });
-    expect(v.R).toBe(275000);
-    expect(v.U).toBe(40000);
-    expect(v.T).toBe(315000);
-    // 現金は今日出ていくので、10/27 の 75000 で決まる
-    expect(cashLimit(d, today)).toEqual({ value: 65000, date: "2026-10-27" });
-    expect(dipBefore(d, today)).toBeNull();
-  });
   it("残高の報告日より前の日付の予定は、残高に入っているものとして数えない（月の途中で作った給与の予定など）", () => {
     const d = D({
       balances: [base],
@@ -194,16 +173,11 @@ describe("使える額の計算", () => {
   it("引落日より前に安全残高を下回る日があれば知らせる", () => {
     const d = D({ balances: [base], entries: [E({ kind: "expense", method: "bank", category: "固定引落", amount: 400000, date: "2026-11-04" })] });
     expect(dipBefore(d, today)).toEqual({ value: -95000, date: "2026-11-04" });
+    expect(dipBefore(D({ balances: [base] }), today)).toBeNull();
   });
-  it("今月カードで使うと、R が同じだけ減り、T は変わらない（引落が給料日の後でも）", () => {
-    const entries = [
-      E({ kind: "expense", method: "bank", category: "固定引落", amount: 300000, date: "2026-11-09" }),
-      E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-11-16", category: null }),
-    ];
-    const a = computeMonth(D({ balances: [base], entries }), "2026-10", today);
-    const b = computeMonth(D({ balances: [base], entries: [...entries, E({ method: "card", amount: 3000, date: "2026-10-20" })] }), "2026-10", today);
-    expect(a.R! - b.R!).toBe(3000);
-    expect(b.T).toBe(a.T);
+  it("現金はすぐ口座から出るので、今日からいちばん少ない日で上限を出す", () => {
+    const d = D({ balances: [base], settings: { ...S, safety: 10000 }, entries: [E({ kind: "expense", method: "bank", category: "固定引落", amount: 230000, date: "2026-10-27" })] });
+    expect(cashLimit(d, today)).toEqual({ value: 65000, date: "2026-10-27" });
   });
   it("カード請求額が分かっていれば、その日のクレカ明細の代わりに請求額で数える", () => {
     const d = D({
@@ -214,66 +188,110 @@ describe("使える額の計算", () => {
     const p = projection(d, today)!;
     expect(assetAt(p, "2026-10-26")).toBe(305000 - 123456);
   });
-  it("予備は総予算から他の費目予算を引いた残り。未分類は予備に数える", () => {
+  it("立替・予算外も口座からは出る。リボで買った物は出ない（返済で出る）", () => {
     const d = D({
       balances: [base],
+      entries: [E({ amount: 88000, tatekae: 82500, category: "外食" }), E({ amount: 50000, category: "予算外" }), E({ amount: 30000, method: "revo", category: "日用品・通販" })],
+    });
+    expect(assetAt(projection(d, today)!, "2026-11-26")).toBe(305000 - 88000 - 50000);
+  });
+  it("先の月の見通しは、前の月の分をその月の引落日に使ったものとして続けて計算する", () => {
+    const inc = (date: string) => E({ kind: "income", status: "plan", method: "bank", amount: 250000, date, category: null });
+    const fc = forecast(D({ balances: [base], entries: [inc("2026-11-16"), inc("2026-12-15"), inc("2027-01-15")] }), today, 2)!;
+    expect(fc.map((f) => f.R)).toEqual([555000, 250000, 250000]);
+  });
+});
+
+describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用マイナス）", () => {
+  const today = "2026-10-20";
+  const salary = E({ kind: "income", status: "confirmed", method: "bank", amount: 260000, date: "2026-10-15", category: "給与" });
+  const rent = E({ kind: "expense", method: "bank", category: "固定引落", amount: 70000, date: "2026-10-04" });
+  const scholarship = E({ kind: "expense", status: "plan", method: "bank", category: "固定引落", amount: 30000, date: "2026-10-27" });
+  const revo = E({ kind: "expense", status: "plan", method: "card", category: "返済", amount: 20000, date: "2026-10-26" });
+  it("予算の元を明細と予定から出す。賞与や売却代金・立替の返金は、追加予算にしたときだけ入る", () => {
+    const d = D({
+      entries: [
+        salary, rent, scholarship, revo,
+        E({ kind: "income", status: "plan", method: "bank", amount: 5000, date: "2026-10-20", category: "追加予算", item: "イベチケ" }),
+        E({ kind: "income", status: "plan", method: "cash", amount: 16000, date: "2026-10-25", category: null, item: "立替の返金" }),
+        E({ kind: "income", status: "confirmed", method: "bank", amount: 40000, date: "2026-10-20", category: null, item: "売却代金" }),
+      ],
+    });
+    const b = monthBase(d, "2026-10");
+    expect([b.salary, b.extra, b.fixed, b.goal]).toEqual([260000, 5000, 100000, 20000]);
+    expect(b.T).toBe(260000 + 5000 - 100000 - 20000);
+  });
+  it("定期のお金から作った収入は、扱いを決めていなければ給与として数える", () => {
+    const d = D({ entries: [E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-11-16", category: null, recurring_id: "r1" })] });
+    expect(monthBase(d, "2026-11").salary).toBe(250000);
+  });
+  it("目標用マイナスの初期値は、その月の返済＋貯金（貯金を始める月から）。手で直した月はその値を使う", () => {
+    const settings = { ...S, savingMonthly: 20000, savingStart: "2027-01" };
+    const d = D({ settings, entries: [revo] });
+    expect(monthBase(d, "2026-10").goal).toBe(20000);
+    expect(monthBase(d, "2026-12").goal).toBe(0);
+    expect(monthBase(d, "2027-01").goal).toBe(20000);
+    const m = monthBase(D({ settings, entries: [revo], budgets: [{ month: "2026-10", category: "#目標用マイナス", amount: 35000 }] }), "2026-10");
+    expect(m.goal).toBe(35000);
+    expect(m.manual.goal).toBe(true);
+    expect(m.auto.goal).toBe(20000);
+  });
+  it("自由に使える残り ＝ 予算 − 使った − 予定。返済・固定引落は自由に使えるお金から引かない", () => {
+    const d = D({ entries: [salary, rent, revo, E({ amount: 3000, category: "外食", date: "2026-10-18" }), E({ status: "plan", amount: 5000, category: "外食", date: "2026-10-25" })] });
+    const v = computeMonth(d, "2026-10", today);
+    expect(v.T).toBe(260000 - 70000 - 20000);
+    expect([v.U, v.P]).toEqual([3000, 5000]);
+    expect(v.R).toBe(v.T - 8000);
+    expect(v.outside.map((e) => e.category).sort()).toEqual(["固定引落", "返済"]);
+  });
+  it("カードで使っても現金で使っても、残りは同じだけ減り、予算は変わらない", () => {
+    const a = computeMonth(D({ entries: [salary] }), "2026-10", today);
+    const b = computeMonth(D({ entries: [salary, E({ method: "card", amount: 3000, category: "食料品" }), E({ method: "cash", amount: 1000, category: "食料品" })] }), "2026-10", today);
+    expect(a.R - b.R).toBe(4000);
+    expect(b.T).toBe(a.T);
+  });
+  it("予備は予算から他の費目予算を引いた残り。未分類は予備に数える", () => {
+    const d = D({
       budgets: [{ month: "2026-10", category: "食料品", amount: 30000 }, { month: "2026-10", category: "外食", amount: 20000 }],
-      entries: [E({ amount: 3000, category: null, source: "card_flash", status: "flash" })],
+      entries: [salary, E({ amount: 3000, category: null, source: "card_flash", status: "flash" })],
     });
     const v = computeMonth(d, "2026-10", today);
     const reserve = v.cats.find((c) => c.cat === "予備")!;
-    expect(v.T).toBe(305000 + 0); // R=305000-3000（11/26引落）、U=3000
-    expect(reserve.budget).toBe(305000 - 50000);
+    expect(reserve.budget).toBe(260000 - 50000);
     expect(reserve.used).toBe(3000);
     expect(v.unclassified).toHaveLength(1);
   });
   it("1日に使える額は、残り÷今日を含む月末までの日数", () => {
-    const d = D({ balances: [base], budgets: [{ month: "2026-10", category: "食料品", amount: 30000 }], entries: [E({ amount: 6000 })] });
+    const d = D({ budgets: [{ month: "2026-10", category: "食料品", amount: 30000 }], entries: [E({ amount: 6000 })] });
     const v = computeMonth(d, "2026-10", today);
     const food = v.cats.find((c) => c.cat === "食料品")!;
     expect(v.daysLeft).toBe(12);
     expect(food.daily).toBe(2000);
   });
-  it("立替は予算に数えない。予算外とリボで買った物も数えない。ポイントは予算に数えるが資産は減らない", () => {
-    const d = D({
-      balances: [base],
-      entries: [
-        E({ amount: 88000, tatekae: 82500, category: "外食" }),
-        E({ amount: 50000, category: "予算外" }),
-        E({ amount: 30000, method: "revo", category: "日用品・通販" }),
-        E({ amount: 500, method: "point" }),
-      ],
-    });
+  it("立替は自分の分だけを数える。予算外とリボで買った物は数えない", () => {
+    const d = D({ entries: [E({ amount: 88000, tatekae: 82500, category: "外食" }), E({ amount: 50000, category: "予算外" }), E({ amount: 30000, method: "revo", category: "日用品・通販" })] });
     const v = computeMonth(d, "2026-10", today);
-    expect(v.U).toBe(5500 + 500);
+    expect(v.U).toBe(5500);
     expect(v.outside).toHaveLength(2);
-    const p = projection(d, today)!;
-    expect(assetAt(p, "2026-11-26")).toBe(305000 - 88000 - 50000);
   });
-  it("先の月は、前の月の R をその月の引落日に使ったものとして続けて計算する", () => {
-    const d = D({
-      balances: [base],
-      entries: [
-        E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-11-16", category: null }),
-        E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-12-15", category: null }),
-        E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2027-01-15", category: null }),
-      ],
-    });
-    const fc = forecast(d, today, 2)!;
-    // 10月：11/26〜12/28 の最小は 11/26 の 555000（今の資産＋11月の給与）
-    expect(fc[0].R).toBe(555000);
-    // 11月：12/28〜1/26 は 12月の給与の分だけ
-    expect(fc[1].R).toBe(250000);
-    expect(fc[2].R).toBe(250000);
-  });
-  it("残高の報告がなければ R は出さない", () => {
-    expect(computeMonth(D({}), "2026-10", today).noBalance).toBe(true);
-  });
-  it("予算は前の月から引き継ぐが、予備は引き継がない", () => {
+  it("費目予算は前の月から引き継ぐが、予備は引き継がない", () => {
     const d = D({ budgets: [{ month: "2026-09", category: "食料品", amount: 30000 }, { month: "2026-09", category: "予備", amount: 9999 }] });
     const b = budgetsFor(d, "2026-10");
     expect(b.get("食料品")).toBe(30000);
     expect(b.has("予備")).toBe(false);
+    // 予算の元だけを直した月があっても、費目予算は前の月から引き継ぐ
+    const d2 = D({ budgets: [{ month: "2026-09", category: "食料品", amount: 30000 }, { month: "2026-10", category: "#目標用マイナス", amount: 10000 }] });
+    expect(budgetsFor(d2, "2026-10").get("食料品")).toBe(30000);
+  });
+  it("目標用マイナスの見通し：まず借金に回し、なくなったら貯金に回す", () => {
+    const d = D({
+      settings: { ...S, savingMonthly: 20000, savingStart: "2026-10", reserveGoal: 30000 },
+      debts: [{ id: "d", name: "リボ", balance: 30000, as_of: null, rate: "", min_payment: 0, note: "", planned: false }],
+    });
+    const g = goalPlan(d, "2026-10", 4);
+    expect(g.rows.map((r) => [r.toDebt, r.toSaving, r.debtLeft, r.saved])).toEqual([[20000, 0, 10000, 0], [10000, 10000, 0, 10000], [0, 20000, 0, 30000], [0, 20000, 0, 50000]]);
+    expect(g.payoffYm).toBe("2026-11");
+    expect(g.reachYm).toBe("2026-12");
   });
 });
 

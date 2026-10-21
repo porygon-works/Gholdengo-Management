@@ -88,12 +88,22 @@ export interface Settings {
   varCats: string[]; // 変動費
   fixCats: string[]; // 固定費
   dailyCats: string[]; // 1日に使える額を出す費目
+  savingMonthly: number; // 目標用マイナスの初期値に入れる、毎月の貯金
+  savingStart: string | null; // 貯金を始める月（YYYY-MM）
 }
 
 export const RESERVE = "予備";
 export const REPAY = "返済";
 export const OUTSIDE = "予算外";
 export const FIXED_DEBIT = "固定引落"; // 家賃・ローン・保険など。予算に入れない出金
+
+/** 収入の扱い（収入の明細の category に入れる）。どちらでもなければ予算に入れない */
+export const INCOME_SALARY = "給与";
+export const INCOME_EXTRA = "追加予算";
+
+/** その月の「予算の元」を本人が手で直したときに budgets に入れるキー */
+export const BASE_KEYS = { salary: "#給与", extra: "#追加予算", fixed: "#固定費", goal: "#目標用マイナス" } as const;
+export type BaseKey = keyof typeof BASE_KEYS;
 
 export const DEFAULT_SETTINGS: Settings = {
   safety: 0,
@@ -105,12 +115,14 @@ export const DEFAULT_SETTINGS: Settings = {
   varCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽", "美容", "医療", "衣服"],
   fixCats: ["通信", "水道ガス光熱費", "定期代", "サブスク"],
   dailyCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽"],
+  savingMonthly: 0,
+  savingStart: null,
 };
 
-/** 予算を持つ費目（予備は最後） */
-export const budgetCats = (s: Settings) => [...s.varCats, ...s.fixCats, REPAY, RESERVE];
-/** 予算に入れない費目 */
-export const nonBudgetCats = [OUTSIDE, FIXED_DEBIT];
+/** 予算を持つ費目（予備は最後）。返済は目標用マイナスの中で払うので入れない */
+export const budgetCats = (s: Settings) => [...s.varCats, ...s.fixCats, RESERVE];
+/** 自由に使えるお金に入れない費目 */
+export const nonBudgetCats = [OUTSIDE, FIXED_DEBIT, REPAY];
 
 export interface Data {
   entries: Entry[];
