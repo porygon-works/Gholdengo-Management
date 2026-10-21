@@ -389,43 +389,48 @@ export function accountFlow(d: Data, today: string, to?: string) {
 
 // ---------- 来月の支払い予定（§5.6） ----------
 
-export interface PaymentPart { label: string; amount: number }
-export interface Payment {
-  date: string;
+export type PayGroup = "fixed" | "variable" | "installment" | "tatekae" | "other" | "diff";
+export const PAY_GROUP_LABEL: Record<PayGroup, string> = { fixed: "固定費", variable: "変動費", installment: "分割の返済", tatekae: "立替", other: "その他", diff: "クレカの確定の額との差" };
+
+export interface PayItem {
+  date: string; // 口座から出る日（クレカは引落日）
   name: string;
+  from: string; // 三井・セゾン・口座
   amount: number;
-  state: "予定" | "見込み" | "確定";
-  entry: AccountEntry; // 口座明細の行（クレカ支払いは、まだ保存していない行のこともある）
-  parts: PaymentPart[]; // クレカ支払いの中身（大費目ごと）
+  plan: boolean;
+  card?: CardEntry;
+  account?: AccountEntry;
 }
+export interface PayGroupRow { group: PayGroup; amount: number; items: PayItem[] }
 
 /**
- * 来月の支払い予定（§5.6）：来月 ym に口座から出るお金を、引落日の順に1件ずつ。
- * クレカ支払いは、中身を大費目ごとの合計（固定費・変動費・分割の返済・立替）に分ける
+ * 来月の支払い予定（§5.6）：来月 ym に口座から出るお金を、大費目ごとに分ける。
+ * クレカ支払いは中身のクレカ明細に分けて数える（一部の立替は立替へ）。口座の出金は大費目のまま。クレカ支払いの行そのものは数えない
  */
-export function nextPayments(d: Data, ym: string, today: string): { ym: string; rows: Payment[]; total: number } {
-  const bills = billsFor(d, ym);
-  const all = accountsWithBills(d, today, [ym]).filter((e) => e.account === "bank" && e.direction === "out" && ymOf(e.date) === ym);
-  const rows: Payment[] = all.map((e) => {
-    const b = e.group === "card" ? bills.find((x) => x.card.id === e.card && x.date === e.date) : undefined;
-    const parts: PaymentPart[] = [];
-    if (b) {
-      // 大費目ごとの合計（一部の立替は立替に数える）
-      const sum = { fixed: 0, variable: 0, installment: 0, tatekae: 0 };
-      for (const x of b.items) {
-        if (x.group === "fixed" || x.group === "variable") { sum[x.group] += ownCost(x); sum.tatekae += x.amount - ownCost(x); }
-        else if (x.group === "installment") sum.installment += x.amount;
-        else sum.tatekae += x.amount;
-      }
-      const labels = [["fixed", "固定費"], ["variable", "変動費"], ["installment", "分割の返済"], ["tatekae", "立替"]] as const;
-      for (const [k, label] of labels) if (sum[k]) parts.push({ label, amount: sum[k] });
-      if (b.amount !== b.estimate) parts.push({ label: "確定の額との差", amount: b.amount - b.estimate });
+export function nextPayments(d: Data, ym: string): { ym: string; groups: PayGroupRow[]; total: number } {
+  const map = new Map<PayGroup, PayItem[]>();
+  const add = (g: PayGroup, x: PayItem) => { if (x.amount) map.set(g, [...(map.get(g) ?? []), x]); };
+  for (const b of billsFor(d, ym)) {
+    for (const e of b.items) {
+      const base = { date: b.date, name: e.name || e.shop || e.category || "クレカ", from: b.card.name, plan: e.status === "plan", card: e };
+      const own = ownCost(e);
+      if (e.group === "fixed" || e.group === "variable") { add(e.group, { ...base, amount: own }); add("tatekae", { ...base, amount: e.amount - own }); }
+      else if (e.group === "installment") add("installment", { ...base, amount: e.amount });
+      else add("tatekae", { ...base, amount: e.amount });
     }
-    const amount = b ? b.amount : e.amount;
-    const state: Payment["state"] = e.group === "card" ? (e.locked ? "確定" : "見込み") : e.status === "plan" ? "予定" : "確定";
-    return { date: e.date, name: e.name || e.category || "出金", amount, state, entry: e, parts };
-  }).sort((a, b) => a.date.localeCompare(b.date));
-  return { ym, rows, total: rows.reduce((a, r) => a + r.amount, 0) };
+    if (b.amount !== b.estimate) add("diff", { date: b.date, name: billName(b), from: b.card.name, amount: b.amount - b.estimate, plan: false, account: b.row ?? undefined });
+  }
+  for (const e of d.accounts) {
+    if (e.account !== "bank" || e.direction !== "out" || e.group === "card" || ymOf(e.date) !== ym) continue;
+    const g: PayGroup = e.group === "fixed" || e.group === "variable" || e.group === "tatekae" ? e.group : e.source === "goal" ? "installment" : "other";
+    add(g, { date: e.date, name: e.name || e.category || "出金", from: "口座", amount: e.amount, plan: e.status === "plan", account: e });
+  }
+  const order: PayGroup[] = ["fixed", "variable", "installment", "tatekae", "other", "diff"];
+  const groups = order.filter((g) => map.has(g)).map((g) => {
+    const items = map.get(g)!.sort((a, b) => a.date.localeCompare(b.date));
+    return { group: g, amount: items.reduce((a, x) => a + x.amount, 0), items };
+  });
+  return { ym, groups, total: groups.reduce((a, g) => a + g.amount, 0) };
 }
 
 // ---------- 計画をつくる（§5.7） ----------
