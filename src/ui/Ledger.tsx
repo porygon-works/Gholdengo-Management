@@ -59,7 +59,7 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
       </section>
       {v.outside.length > 0 && (
         <section>
-          <h2>予算に入れない支出 <small>固定引落・予算外・リボで買った物</small></h2>
+          <h2>自由に使えるお金に入れない支出 <small>固定引落・返済・予算外・リボで買った物</small></h2>
           <div className="panel"><div className="list">{v.outside.sort((a, b) => b.date.localeCompare(a.date)).map((e) => <EntryRow key={e.id} e={e} onOpen={onOpen} showCat />)}</div></div>
         </section>
       )}

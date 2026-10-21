@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { addDays, budgetCats, FIXED_DEBIT, OUTSIDE, todayJST, type Entry, type Kind, type Method, type Status } from "../engine";
+import { addDays, budgetCats, FIXED_DEBIT, INCOME_EXTRA, INCOME_SALARY, isSalary, OUTSIDE, REPAY, todayJST, type Entry, type Kind, type Method, type Status } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { ALL_METHODS, Field, md, METHOD_LABEL, NumInput, Select, Sheet, SOURCE_LABEL, STATUS_LABEL, StatusChip, toast, yen, entryTitle } from "./common";
 
@@ -7,7 +7,7 @@ const UNC = "未分類";
 
 export function catOptions(d: AppData, kind: Kind) {
   if (kind !== "expense") return [UNC];
-  return [UNC, ...budgetCats(d.settings), OUTSIDE, FIXED_DEBIT];
+  return [UNC, ...budgetCats(d.settings), REPAY, OUTSIDE, FIXED_DEBIT];
 }
 
 interface Props {
@@ -26,6 +26,8 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
   const [amount, setAmount] = useState<number | "">(entry || base.amount ? base.amount : "");
   const [method, setMethod] = useState<Method>(base.method);
   const [cat, setCat] = useState(base.category ?? UNC);
+  // 収入の扱い：給与（予算の元）／追加予算／予算に入れない
+  const [incomeUse, setIncomeUse] = useState<string>(base.kind === "income" && entry && isSalary(entry) ? INCOME_SALARY : base.category === INCOME_EXTRA ? INCOME_EXTRA : "");
   const [shop, setShop] = useState(base.shop);
   const [item, setItem] = useState(base.item);
   const [memo, setMemo] = useState(base.memo);
@@ -43,7 +45,7 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
 
   const save = async () => {
     if (!amount || !date) { toast("日付と金額を入れてください"); return; }
-    const category = kind === "expense" && cat !== UNC ? cat : null;
+    const category = kind === "expense" ? (cat !== UNC ? cat : null) : incomeUse || null;
     const v = { kind, status, date, amount, method, category, shop, item, memo, tatekae: tatekae || 0 };
     const ok = await store.run(async () => {
       await (entry ? actions.updateEntry(data, entry.id, v) : actions.addEntry(v));
@@ -89,6 +91,11 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
           <Field label="費目"><Select value={cat} options={catOptions(data, kind)} onChange={setCat} /></Field>
           <Field label="金種"><Select value={method} options={ALL_METHODS} onChange={setMethod} labels={METHOD_LABEL} /></Field>
         </div>
+      )}
+      {kind === "income" && (
+        <Field label="予算の扱い" hint="給与は今月の予算の元になります。イベチケのように予算に足すものは「追加予算」。賞与や立替の返金などは「予算に入れない」">
+          <Select value={incomeUse} options={[INCOME_SALARY, INCOME_EXTRA, ""]} labels={{ [INCOME_SALARY]: "給与（予算の元）", [INCOME_EXTRA]: "追加予算", "": "予算に入れない" }} onChange={setIncomeUse} />
+        </Field>
       )}
       <Field label={kind === "income" ? "内容（例：給与・賞与・立替の返金）" : "買ったもの"}><input value={item} onChange={(e) => setItem(e.target.value)} /></Field>
       {kind === "expense" && <Field label="お店" hint={fromMail ? "メールから入ったお店の名前。費目を直すと、このお店のルールとして覚えます" : undefined}><input value={shop} onChange={(e) => setShop(e.target.value)} /></Field>}

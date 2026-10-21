@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { addMonths, balanceTotal, cardPayDate, computeMonth, forecast, latestBalance, passbook, paydayChecks, REPAY, ymOf } from "../engine";
+import { addMonths, balanceTotal, cardPayDate, forecast, latestBalance, monthBase, passbook, paydayChecks, ymOf } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { Chip, Empty, Field, md, NumInput, Sheet, signed, toast, yen, ymLabel } from "./common";
 
@@ -9,8 +9,7 @@ export function Goals({ data, today }: { data: AppData; today: string }) {
   const known = debts.filter((d) => !d.planned).reduce((a, d) => a + d.balance, 0);
   const fc = forecast(data, today, 3);
   const checks = paydayChecks(data, today, 3);
-  const v = computeMonth(data, ymOf(today), today);
-  const repayBudget = v.cats.find((c) => c.cat === REPAY)?.budget ?? 0;
+  const goal = monthBase(data, ymOf(today)).goal;
   const minPay = debts.filter((d) => !d.planned).reduce((a, d) => a + d.min_payment, 0);
 
   return (
@@ -23,7 +22,7 @@ export function Goals({ data, today }: { data: AppData; today: string }) {
               <span className="t"><div>{d.name} {d.planned && <Chip kind="warn">予定</Chip>}</div><div>{d.note}</div></span>
               <span className="a num">{yen(d.balance)}</span>
             </div>))}</div> : <div className="note">借金は入っていません（設定→借金）</div>}
-          {minPay > repayBudget && <div className="alert">今月の「返済」の予算（{yen(repayBudget)}円）が、最低返済額の合計（{yen(minPay)}円）より少ないです。</div>}
+          {minPay > goal && <div className="alert">今月の目標用マイナス（{yen(goal)}円）が、最低返済額の合計（{yen(minPay)}円）より少ないです。</div>}
         </div>
       </section>
       <section>

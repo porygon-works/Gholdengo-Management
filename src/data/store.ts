@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf,
+  addMonths, BASE_KEYS, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf, type BaseKey,
   type Balance, type Budget, type CardBill, type Data, type Debt, type Entry, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, type Raw, type Row } from "./backend";
@@ -49,7 +49,7 @@ function readCache(): Raw | null { try { return JSON.parse(localStorage.getItem(
  * 1. 初めての起動なら設定とルールの初めの値を入れる
  * 2. 定期のお金から、今月〜5か月先の予定を作る（3か月先の月の判定に、その先の給与まで要るため）
  * 3. 未分類の明細に、あとから覚えたルールを当てる。そのあと重複を自動でまとめる
- * 4. 今月の予備の予算を保存する（月が終わったあとに予算と実績を比べるため）
+ * 4. 今月の費目予算がまだなければ、前の月から引き継いだ値を保存する
  */
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   let wrote = false;
@@ -75,15 +75,12 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
     wrote = true;
   }
 
-  if (!wrote) {
+  if (!wrote && !d.budgets.some((b) => b.month === cur && !b.category.startsWith("#"))) {
+    // 今月の費目予算がまだなければ、前の月から引き継いだ値を今月の分として保存する
+    // （あとで前の月の予算を直しても、過ぎた月の予算が変わらないように）
     const v = computeMonth(d, cur, today);
-    const saved = d.budgets.find((b) => b.month === cur && b.category === RESERVE);
-    if (v.T != null && saved?.amount !== v.reserveBudget) {
-      // 今月の費目予算がまだなければ、引き継いだ値もあわせて保存する
-      const rows = v.cats.filter((c) => c.cat !== RESERVE && !d.budgets.some((b) => b.month === cur && b.category === c.cat) && c.budget)
-        .map((c) => ({ month: cur, category: c.cat, amount: c.budget }));
-      await backend.upsertKeyed("budgets", [...rows, { month: cur, category: RESERVE, amount: v.reserveBudget }]);
-    }
+    const rows = v.cats.filter((c) => c.cat !== RESERVE && c.budget).map((c) => ({ month: cur, category: c.cat, amount: c.budget }));
+    if (rows.length) await backend.upsertKeyed("budgets", rows);
   }
   return wrote;
 }
@@ -191,6 +188,10 @@ export const actions = {
   },
 
   saveSettings: (s: Settings) => backend.upsertKeyed("settings", [{ data: s }]),
+
+  /** その月の「予算の元」を手で直す。null なら自動（明細と予定から出す値）に戻す */
+  saveBase: (month: string, key: BaseKey, amount: number | null) =>
+    amount == null ? backend.removeBudget(month, BASE_KEYS[key]) : backend.upsertKeyed("budgets", [{ month, category: BASE_KEYS[key], amount }]),
 
   async saveRecurring(d: AppData, r: Partial<Recurring> & { id?: string }, today: string) {
     const { id, ...rest } = r;
