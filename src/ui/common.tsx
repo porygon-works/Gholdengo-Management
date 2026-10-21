@@ -6,9 +6,10 @@ export const signed = (n: number) => (n < 0 ? "−" + yen(-n) : yen(n));
 export const md = (s: string) => { const [, m, d] = s.split("-"); return `${+m}/${+d}`; };
 export const ymLabel = (ym: string) => `${ym.slice(0, 4)}年${+ym.slice(5)}月`;
 
-export const METHOD_LABEL: Record<Method, string> = { card: "クレカ", cash: "現金", paypay: "PayPay", ic: "交通系", point: "ポイント", bank: "口座", revo: "リボ" };
-export const QUICK_METHODS: Method[] = ["card", "cash", "paypay", "ic", "point"];
-export const ALL_METHODS: Method[] = ["card", "cash", "paypay", "ic", "point", "bank", "revo"];
+// PayPay と交通系は、チャージした額をその日の支出として数える（チャージしたあと何に使ったかは管理しない）
+export const METHOD_LABEL: Record<Method, string> = { card: "クレカ", cash: "現金", paypay: "PayPayチャージ", ic: "交通系チャージ", point: "ポイント", bank: "口座", revo: "リボ" };
+export const QUICK_METHODS: Method[] = ["card", "cash", "paypay", "ic"];
+export const ALL_METHODS: Method[] = ["card", "cash", "paypay", "ic", "bank", "revo"];
 export const STATUS_LABEL: Record<Status, string> = { plan: "予定", flash: "速報", confirmed: "確定" };
 export const SOURCE_LABEL: Record<Entry["source"], string> = { manual: "手入力", card_flash: "カード速報", card_statement: "カード明細", recurring: "定期", migration: "移行" };
 

@@ -99,7 +99,7 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
           {refund && (
             <div className="grid2">
               <Field label="返してもらう日（見込み）"><input type="date" value={refundDate} onChange={(e) => setRefundDate(e.target.value)} /></Field>
-              <Field label="受け取り方"><Select value={refundMethod} options={["cash", "paypay", "bank"] as Method[]} labels={METHOD_LABEL} onChange={setRefundMethod} /></Field>
+              <Field label="受け取り方"><Select value={refundMethod} options={["cash", "bank"] as Method[]} labels={METHOD_LABEL} onChange={setRefundMethod} /></Field>
             </div>
           )}
           <div className="note">返してもらうまでは、立替の分も口座から出たままなので、残り予算はその分少なく出ます。入金の予定を入れると戻ります。</div>
