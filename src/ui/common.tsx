@@ -81,8 +81,6 @@ export function NumInput({ value, onChange, placeholder, autoFocus, id, plain }:
 /** 金額の表示：¥ をつける */
 export const money = (n: number) => (n < 0 ? "−¥" + yen(-n) : "¥" + yen(n));
 
-/** 確定と予定の合計。予定があれば（予定の額）を添える。見出しに「（）内は予定」と書く */
-export const Spent = ({ used, planned }: { used: number; planned: number }) => <>{money(used + planned)}{planned ? <span className="note">（{yen(planned)}）</span> : null}</>;
 
 export function Select<T extends string>({ value, options, onChange, labels }: { value: T; options: readonly T[]; onChange: (v: T) => void; labels?: Partial<Record<T, string>> }) {
   return (

@@ -26,13 +26,15 @@ function settingsOf(raw: Raw): Settings {
 function toData(raw: Raw): AppData {
   const settings = settingsOf(raw);
   applyLabels(settings);
-  const accounts: AccountEntry[] = raw.account_entries.map((r) => ({
+  // 消した明細（deleted）は計算にも画面にも出さない。source_ref だけ覚えておき、また作らない
+  const removedRefs = [...raw.account_entries, ...raw.card_entries].filter((r) => r.deleted && r.source_ref).map((r) => str(r.source_ref));
+  const accounts: AccountEntry[] = raw.account_entries.filter((r) => !r.deleted).map((r) => ({
     id: str(r.id), account: r.account === "wallet" ? "wallet" : "bank", direction: r.direction === "in" ? "in" : "out", status: r.status === "plan" ? "plan" : "confirmed",
     group: (r.group as AccountEntry["group"]) || "other", category: opt(r.category), name: str(r.name), memo: str(r.memo), date: day(r.date), amount: num(r.amount),
     source: (r.source as AccountEntry["source"]) || "manual", source_ref: opt(r.source_ref), recurring_id: opt(r.recurring_id), goal_id: opt(r.goal_id),
     card: opt(r.card), pair_id: opt(r.pair_id), locked: !!r.locked, at: str(r.created_at) || undefined,
   }));
-  const cards: CardEntry[] = raw.card_entries.map((r) => ({
+  const cards: CardEntry[] = raw.card_entries.filter((r) => !r.deleted).map((r) => ({
     id: str(r.id), card: str(r.card) || settings.cards[0].id, status: r.status === "plan" ? "plan" : "confirmed", date: day(r.date), amount: num(r.amount),
     group: (r.group as CardEntry["group"]) || "variable", category: opt(r.category), name: str(r.name), shop: str(r.shop), memo: str(r.memo), tatekae: num(r.tatekae),
     source: (r.source as CardEntry["source"]) || "manual", source_ref: opt(r.source_ref), merged_into: opt(r.merged_into),
@@ -48,7 +50,7 @@ function toData(raw: Raw): AppData {
   const budgets: Budget[] = raw.budgets.map((r) => ({ month: str(r.month), category: str(r.category), amount: num(r.amount) }));
   const rules: Rule[] = raw.rules.map((r) => ({ id: str(r.id), pattern: str(r.pattern), category: str(r.category) }));
   const review: ReviewRow[] = raw.review.map((r) => ({ id: str(r.id), kind: str(r.kind), title: str(r.title), body: str(r.body), resolved: !!r.resolved, created_at: str(r.created_at) }));
-  return { accounts, cards, balances, recurring, goals, budgets, rules, settings, review };
+  return { accounts, cards, balances, recurring, goals, budgets, rules, settings, review, removedRefs };
 }
 
 const CACHE = "gholdengo.cache.v3";
@@ -196,11 +198,11 @@ export function useStore() {
   const [data, setData] = useState<AppData | null>(() => { const c = readCache(); return c ? toData(c) : null; });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const busy = useRef(false);
+  // 読み直しは1つずつ順番に行う。読み直しの最中に頼まれたら、終わってからもう1回読む（保存や削除のあとに古い画面が残らないように）
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const queued = useRef<Promise<void> | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (busy.current) return;
-    busy.current = true;
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const today = todayJST();
@@ -215,13 +217,21 @@ export function useStore() {
       setError(null);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      // v3 の表がまだないとき（SQL を流す前）
-      setError(/(account_entries|card_entries|goals)/.test(m) ? `${m}（Supabase の SQL Editor で supabase/migrations/0004_v3_tables.sql を実行してください）` : m);
+      // 新しい表・列がまだないとき（SQL を流す前）
+      setError(/(account_entries|card_entries|goals|deleted|every)/.test(m) ? `${m}（Supabase の SQL Editor で supabase/migrations/ の新しい SQL を実行してください）` : m);
     } finally {
-      busy.current = false;
       setLoading(false);
     }
   }, []);
+
+  const refresh = useCallback((): Promise<void> => {
+    // まだ始まっていない読み直しがあれば、それにまとめる
+    if (queued.current) return queued.current;
+    const p = chain.current.then(() => { queued.current = null; return load(); });
+    queued.current = p;
+    chain.current = p.catch(() => undefined);
+    return p;
+  }, [load]);
 
   useEffect(() => {
     refresh();
@@ -247,7 +257,16 @@ export type Store = ReturnType<typeof useStore>;
 export type NewAccount = Pick<AccountEntry, "account" | "direction" | "status" | "group" | "category" | "name" | "date" | "amount"> & Partial<Pick<AccountEntry, "memo">>;
 export type NewCard = Pick<CardEntry, "card" | "status" | "group" | "category" | "date" | "amount"> & Partial<Pick<CardEntry, "name" | "shop" | "memo" | "tatekae">>;
 
-/** 自動で作った予定（定期・目標・クレカ請求）を今月以降で消す（作り直すため） */
+/**
+ * 明細を消す。メールや定期・目標から作った行（source_ref がある）は、行を残して deleted にする。
+ * 消してしまうと、メールの取り込みや予定づくりで、また同じものが作られるため
+ */
+async function removeRow(t: "account_entries" | "card_entries", e: { id: string; source_ref: string | null }) {
+  if (e.source_ref) await backend.update(t, e.id, t === "card_entries" ? { deleted: true, merged_into: null } : { deleted: true });
+  else await backend.remove(t, e.id);
+}
+
+/** 自動で作った予定（定期・目標・クレカ請求）を今月以降で消す（作り直すため。作り直すので、行ごと消す） */
 async function removeFuturePlans(d: AppData, pred: (e: { source: string; recurring_id: string | null; goal_id: string | null }) => boolean, today: string) {
   for (const e of d.accounts) if (e.status === "plan" && !e.locked && e.date >= today.slice(0, 7) && pred(e)) await backend.remove("account_entries", e.id);
   for (const e of d.cards) if (e.status === "plan" && !e.locked && !e.merged_into && e.date >= today.slice(0, 7) && pred(e)) await backend.remove("card_entries", e.id);
@@ -256,10 +275,12 @@ async function removeFuturePlans(d: AppData, pred: (e: { source: string; recurri
 export const actions = {
   addAccount: (e: NewAccount) => backend.insert("account_entries", [{ memo: "", ...e, source: "manual", locked: true }]),
   updateAccount: (id: string, patch: Partial<AccountEntry>) => backend.update("account_entries", id, { ...patch, locked: true } as Row),
+  /** 口座明細を消す。ATM の相手の行も消す */
   async deleteAccount(d: AppData, id: string) {
     const e = d.accounts.find((x) => x.id === id);
-    await backend.remove("account_entries", id);
-    if (e?.pair_id) await backend.remove("account_entries", e.pair_id);
+    await removeRow("account_entries", e ?? { id, source_ref: null });
+    const pair = e?.pair_id ? d.accounts.find((x) => x.id === e.pair_id) : undefined;
+    if (pair) await removeRow("account_entries", pair);
   },
   /** 予定を確定にする（金額と日付を実際の値にする） */
   confirmAccount: (id: string, amount: number, date: string) => backend.update("account_entries", id, { status: "confirmed", amount, date, locked: true }),
@@ -274,7 +295,12 @@ export const actions = {
       if (pattern) await backend.insert("rules", [{ pattern, category: patch.category }], { onConflict: "pattern", merge: true });
     }
   },
-  deleteCard: (id: string) => backend.remove("card_entries", id),
+  /** クレカ明細を消す。この明細にまとめた明細（速報・手入力・予定）も一緒に消す（残すと、まとめが外れてまた出てくる） */
+  async deleteCard(d: AppData, id: string) {
+    const e = d.cards.find((x) => x.id === id);
+    for (const a of d.cards.filter((x) => x.merged_into === id)) await removeRow("card_entries", a);
+    await removeRow("card_entries", e ?? { id, source_ref: null });
+  },
   confirmCard: (id: string, amount: number, date: string) => backend.update("card_entries", id, { status: "confirmed", amount, date, locked: true }),
 
   /** まとめを取り消し、以後は別のものとして扱う */

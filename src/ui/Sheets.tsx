@@ -71,7 +71,7 @@ export function CardSheet({ store, data, entry, preset, onClose, switcher }: { s
   };
   const remove = async () => {
     if (!entry || !confirm("このクレカ明細を消しますか？")) return;
-    if (await store.run(() => actions.deleteCard(entry.id))) { toast("消しました"); onClose(); }
+    if (await store.run(() => actions.deleteCard(data, entry.id))) { toast("消しました"); onClose(); }
   };
   const unmerge = async (id: string) => { if (await store.run(() => actions.unmerge(data, id))) { toast("まとめを取り消しました"); onClose(); } };
 

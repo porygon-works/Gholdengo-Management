@@ -115,7 +115,7 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   const grid = (cs: string[]) => cs.map((c) => {
     const r = v.cats.find((x) => x.cat === c);
     return [
-      <label key={c + "l"} htmlFor={`b_${c}`}>{c}<span className="note"> 使った {money((r?.used ?? 0) + (r?.planned ?? 0))}{r?.planned ? `（予定 ${yen(r.planned)}）` : ""}</span></label>,
+      <label key={c + "l"} htmlFor={`b_${c}`}>{c}<span className="note"> 使った {money(r?.used ?? 0)}{r?.planned ? `・予定 ${money(r.planned)}` : ""}</span></label>,
       <NumInput key={c + "i"} id={`b_${c}`} value={vals[c] ?? ""} onChange={(x) => setVals({ ...vals, [c]: x })} />,
     ];
   });
@@ -290,13 +290,22 @@ function Income({ store, data, onOpen }: { store: Store; data: AppData; onOpen: 
 // ---------- 定期マスタ ----------
 
 const SHIFT_LABEL = { next: "後の平日", prev: "前の平日", none: "ずらさない" } as const;
+const EVERY_LABEL: Record<string, string> = { "1": "毎月", "2": "2か月ごと（隔月）", "3": "3か月ごと", "6": "半年ごと", "12": "毎年" };
+/** 「毎月27日」「2か月ごと（11月から）27日」「毎年11月27日」 */
+const whenLabel = (r: Pick<Recurring, "every" | "day" | "start_month">) => {
+  const every = r.every || 1;
+  if (every === 1) return `毎月${r.day}日`;
+  const m = r.start_month ? +r.start_month.slice(5) : null;
+  if (every === 12) return `毎年${m ? `${m}月` : ""}${r.day}日`;
+  return `${EVERY_LABEL[String(every)] ?? `${every}か月ごと`}${m ? `（${m}月から）` : ""}${r.day}日`;
+};
 const payName = (s: S, r: Pick<Recurring, "pay" | "card">) => (r.pay === "card" ? `クレカ（${s.cards.find((c) => c.id === r.card)?.name ?? s.cards[0].name}）` : r.pay === "wallet" ? "財布" : "口座");
 const groupName = (r: Recurring) => (r.pay === "card" ? CARD_GROUP_LABEL[r.group as CardGroup] : ACCOUNT_GROUP_LABEL[r.group as AccountGroup]) ?? "";
 
 function RecRow({ r, s, onOpen }: { r: Recurring; s: S; onOpen: () => void }) {
   return (
     <button className="row" onClick={onOpen} style={{ gridTemplateColumns: "1fr auto" }}>
-      <span className="t"><div>{r.name} {!r.active && <span className="chip">止めている</span>}</div><div>毎月{r.day}日（土日祝は{SHIFT_LABEL[r.shift]}）・{payName(s, r)}・{groupName(r)}{r.category ? `・${r.category}` : ""}{r.end_month ? `・${ymLabel(r.end_month)}まで` : ""}</div></span>
+      <span className="t"><div>{r.name} {!r.active && <span className="chip">止めている</span>}</div><div>{whenLabel(r)}（土日祝は{SHIFT_LABEL[r.shift]}）・{payName(s, r)}・{groupName(r)}{r.category ? `・${r.category}` : ""}{r.end_month ? `・${ymLabel(r.end_month)}まで` : ""}</div></span>
       <span className="a num">{r.kind === "income" ? "＋" : ""}{yen(r.amount)}</span>
     </button>
   );
@@ -340,7 +349,9 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
   const save = async () => {
     if (!x.name || !x.amount || !x.day) { toast("名前・金額・日を入れてください"); return; }
     const budgeted = x.kind === "expense" && (x.group === "variable" || x.group === "fixed");
-    const row = { ...x, category: budgeted ? x.category || null : null };
+    // 2か月ごと・毎年などは、始める月から数える（なければ今月から）
+    const every = x.every || 1;
+    const row = { ...x, every, start_month: every > 1 && !x.start_month ? today.slice(0, 7) : x.start_month ?? null, category: budgeted ? x.category || null : null };
     if (await store.run(() => actions.saveRecurring(data, row, today))) { toast("保存しました"); onClose(); }
   };
   const remove = async () => {
@@ -353,7 +364,8 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
       <Field label="名前"><input value={x.name ?? ""} onChange={(e) => set({ name: e.target.value })} /></Field>
       <div className="grid2">
         <Field label="金額（見込み）"><NumInput value={x.amount ?? ""} onChange={(v) => set({ amount: v === "" ? 0 : v })} /></Field>
-        <Field label="毎月の日（31＝月末）" hint={x.pay === "card" ? "クレカは利用日" : undefined}><NumInput plain value={x.day ?? ""} onChange={(v) => set({ day: v === "" ? 1 : Math.min(31, Math.max(1, v)) })} /></Field>
+        <Field label="くり返し"><Select value={String(x.every || 1)} options={["1", "2", "3", "6", "12"]} labels={EVERY_LABEL} onChange={(v) => set({ every: +v })} /></Field>
+        <Field label="日（31＝月末）" hint={x.pay === "card" ? "クレカは利用日" : undefined}><NumInput plain value={x.day ?? ""} onChange={(v) => set({ day: v === "" ? 1 : Math.min(31, Math.max(1, v)) })} /></Field>
         <Field label="土日祝のとき"><Select value={x.shift ?? "next"} options={["next", "prev", "none"] as const} labels={SHIFT_LABEL} onChange={(v) => set({ shift: v })} /></Field>
         {x.kind === "expense" && <Field label="払い方"><Select value={payKey} options={payKeys} labels={payLabels} onChange={(v) => { const card = v.startsWith("card:") ? v.slice(5) : null; set({ pay: card ? "card" : (v as Recurring["pay"]), card, group: card && x.group === "other" ? "fixed" : !card && x.group === "installment" ? "other" : x.group }); }} /></Field>}
       </div>
@@ -361,9 +373,10 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
       {x.kind === "expense" && (x.group === "variable" || x.group === "fixed") && <Field label="費目"><Select value={x.category ?? ""} options={cats} labels={{ "": "未分類" }} onChange={(v) => set({ category: v || null, group: v ? groupOfCat(s, v) : x.group })} /></Field>}
       {x.kind === "expense" && x.pay === "card" && <Field label="お店の名前のヒント（なくてもよい）" hint="カードの明細のお店にこの言葉が入っていれば、費目が違ってもこの予定とまとめます（例：モバイルSuica）"><input value={x.shop ?? ""} onChange={(e) => set({ shop: e.target.value })} /></Field>}
       <div className="grid2">
-        <Field label="始める月（空なら今から）"><input type="month" value={x.start_month ?? ""} onChange={(e) => set({ start_month: e.target.value || null })} /></Field>
+        <Field label={(x.every || 1) > 1 ? "始める月（この月から数える。空なら今月）" : "始める月（空なら今から）"}><input type="month" value={x.start_month ?? ""} onChange={(e) => set({ start_month: e.target.value || null })} /></Field>
         <Field label="終わる月（空ならずっと）"><input type="month" value={x.end_month ?? ""} onChange={(e) => set({ end_month: e.target.value || null })} /></Field>
       </div>
+      {(x.every || 1) > 1 && <div className="note">{whenLabel({ every: x.every || 1, day: x.day || 1, start_month: x.start_month || today.slice(0, 7) })}に予定を作ります。予定がない月は、固定費の見込みにも入りません。</div>}
       <label className="check"><input type="checkbox" checked={x.active !== false} onChange={(e) => set({ active: e.target.checked })} />使う（外すと予定を作らない）</label>
       <div className="btns">
         <button className="btn" onClick={save}>保存</button>

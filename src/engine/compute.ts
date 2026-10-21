@@ -1,6 +1,6 @@
 import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost } from "./schedule";
+import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost, recurringDue } from "./schedule";
 import {
   ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, GOAL_KEY, isFixedCat, RESERVE,
   type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
@@ -90,7 +90,7 @@ export function syncBills(d: Data, today: string, payMonths: string[]) {
   const updates: { id: string; patch: Partial<AccountEntry> }[] = [];
   for (const ym of payMonths) {
     for (const b of billsFor(d, ym)) {
-      if (!b.row) { if (b.estimate > 0) inserts.push(billEntry(b, today)); continue; }
+      if (!b.row) { if (b.estimate > 0 && !d.removedRefs?.includes(billRef(b.card.id, b.date))) inserts.push(billEntry(b, today)); continue; }
       if (b.row.status === "confirmed") continue;
       const patch: Partial<AccountEntry> = {};
       if (!b.row.locked && b.row.amount !== b.estimate) patch.amount = b.estimate;
@@ -171,7 +171,7 @@ export const lumpRef = (g: Goal, date: string) => `goal:${g.id}:lump:${date}`;
  */
 export function missingGoalPlans(d: Data, months: string[]) {
   const s = d.settings;
-  const have = new Set([...d.accounts, ...d.cards].map((e) => e.source_ref).filter(Boolean));
+  const have = new Set([...d.accounts, ...d.cards].map((e) => e.source_ref).filter(Boolean).concat(d.removedRefs ?? []));
   const accounts: Omit<AccountEntry, "id">[] = [];
   const cards: Omit<CardEntry, "id">[] = [];
   for (const g of d.goals) {
@@ -243,7 +243,7 @@ export function budgetsFor(d: Data, ym: string): Map<string, number> {
   // 予算を入れていない固定費の費目は、その月の定期マスタの額、それもなければその月の固定費の明細の合計を初めの値にする
   for (const c of d.settings.fixCats) {
     if (map.has(c)) continue;
-    const sum = d.recurring.filter((r) => r.active && r.kind === "expense" && r.category === c && (!r.start_month || r.start_month <= ym) && (!r.end_month || r.end_month >= ym)).reduce((a, r) => a + r.amount, 0)
+    const sum = d.recurring.filter((r) => r.kind === "expense" && r.category === c && recurringDue(r, ym)).reduce((a, r) => a + r.amount, 0)
       || spendOf(d, ym).filter((x) => x.category === c).reduce((a, x) => a + x.own, 0);
     if (sum) map.set(c, sum);
   }

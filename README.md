@@ -20,7 +20,7 @@ Gmail ──(15分ごと)── GAS ──→ Supabase ←──→ Webアプリ
 Supabase はプロジェクト **porygon-works** に複数のアプリの DB をまとめている。新しいプロジェクトは作らず、この家計簿の表は **`ggmg` スキーマ** に置く。
 
 1. <https://supabase.com> で **porygon-works** プロジェクトを開く。
-2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` …）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
+2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` → `0005_deleted_every.sql` …）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
 3. **Project Settings → Data API → Exposed schemas** に **`ggmg`** を足して **Save**（これをしないとアプリと GAS から表が見えない）。
 4. **Authentication → Users → Add user → Create new user** で、自分のメールとパスワードを入れて作る（Auto Confirm User にチェック。ほかのアプリで作ったユーザーがあればそれを使ってよい）。
 5. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ** にする（自分以外がユーザーを作れないように。ほかのアプリで新規登録を使っているなら、そちらに合わせる）。

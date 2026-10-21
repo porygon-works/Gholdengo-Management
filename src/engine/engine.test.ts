@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, goalBalanceAt, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, goalMinusAuto,
   goalOutlook, goalSchedule, holidays, isBusinessDay, missingGoalPlans, missingRecurring, monthBase, monthlyFor, nextPayday, nextPayments, normalizeShop,
-  planGoals, recurringDate, ruleFor, shiftBusiness, syncBills,
+  planGoals, recurringDate, recurringDue, ruleFor, shiftBusiness, syncBills,
   type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
 } from "./index";
 
@@ -50,7 +50,7 @@ describe("日付と祝日", () => {
 });
 
 describe("定期マスタ", () => {
-  const rec = (p: Partial<Recurring>): Recurring => ({ id: "r1", name: "給与", kind: "income", group: "salary", category: null, amount: 250000, day: 15, shift: "next", pay: "bank", card: null, shop: "", start_month: null, end_month: null, active: true, ...p });
+  const rec = (p: Partial<Recurring>): Recurring => ({ id: "r1", name: "給与", kind: "income", group: "salary", category: null, amount: 250000, day: 15, shift: "next", pay: "bank", card: null, shop: "", every: 1, start_month: null, end_month: null, active: true, ...p });
   it("口座の予定とクレカの予定に分けて作る。土日祝はずらす", () => {
     const salary = rec({});
     const rent = rec({ id: "r2", name: "家賃", kind: "expense", group: "fixed", category: "家賃", amount: 70000, day: 27, pay: "card", card: "saison" });
@@ -60,6 +60,26 @@ describe("定期マスタ", () => {
     expect(out.cards.map((e) => [e.card, e.group, e.category, e.date])).toEqual([["saison", "fixed", "家賃", "2026-11-27"]]);
     const again = missingRecurring({ recurring: [salary], accounts: [A({ source_ref: "rec:r1:2026-11" })], cards: [], settings: S }, ["2026-11"]);
     expect(again.accounts).toHaveLength(0);
+  });
+});
+
+describe("定期マスタ：何か月ごと・消した予定", () => {
+  const rec = (p: Partial<Recurring>): Recurring => ({ id: "r9", name: "年払い", kind: "expense", group: "fixed", category: "サブスク", amount: 2400, day: 10, shift: "none", pay: "card", card: null, shop: "", every: 1, start_month: null, end_month: null, active: true, ...p });
+  it("2か月ごと・毎年は、始める月から数えた月だけ作る。固定費の見込みもその月だけ", () => {
+    const months = ["2026-11", "2026-12", "2027-01", "2027-02", "2027-03"];
+    const two = missingRecurring({ recurring: [rec({ every: 2, start_month: "2026-11" })], accounts: [], cards: [], settings: S }, months);
+    expect(two.cards.map((e) => e.date)).toEqual(["2026-11-10", "2027-01-10", "2027-03-10"]);
+    const year = rec({ every: 12, start_month: "2026-12" });
+    expect(missingRecurring({ recurring: [year], accounts: [], cards: [], settings: S }, months).cards.map((e) => e.date)).toEqual(["2026-12-10"]);
+    expect([recurringDue(year, "2027-12"), recurringDue(year, "2027-11")]).toEqual([true, false]);
+    const d = D({ recurring: [year] });
+    expect([budgetsFor(d, "2026-12").get("サブスク"), budgetsFor(d, "2027-01").has("サブスク")]).toEqual([2400, false]);
+  });
+  it("消した予定（removedRefs）は、また作らない", () => {
+    const r = rec({});
+    expect(missingRecurring({ recurring: [r], accounts: [], cards: [], settings: S, removedRefs: ["rec:r9:2026-11"] }, ["2026-11", "2026-12"]).cards.map((e) => e.date)).toEqual(["2026-12-10"]);
+    const g = G({ id: "g1", balance: 20000, monthly: 10000, card: "saison" });
+    expect(missingGoalPlans(D({ goals: [g], removedRefs: ["goal:g1:2026-11"] }), ["2026-11", "2026-12"]).cards.map((e) => e.source_ref)).toEqual(["goal:g1:2026-12"]);
   });
 });
 

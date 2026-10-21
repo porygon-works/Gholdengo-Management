@@ -80,7 +80,7 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
       <div className="panel" key={c.cat} id={`cat-${c.cat}`}>
         <button className="cathead" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : c.cat)}>
           <span className="n">{c.cat} <Chip kind={st}>{c.rem < 0 ? `超過 ${yen(-c.rem)}` : `残り ${yen(c.rem)}`}</Chip></span>
-          <span className="s num">{money(c.used + c.planned)}{c.planned ? `（${yen(c.planned)}）` : ""} / {money(c.budget)}</span>
+          <span className="s num">使った {money(c.used)}{c.planned ? `・予定 ${money(c.planned)}` : ""} / 予算 {money(c.budget)}</span>
         </button>
         <Bar budget={c.budget} used={c.used} planned={c.planned} />
         {isOpen ? (
@@ -114,11 +114,11 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
             </section>
           )}
           <section>
-            <h2>{ACCOUNT_GROUP_LABEL.variable} <small>{money(v.U + v.P)}{v.P ? `（${yen(v.P)}）・（）内は予定` : ""}</small></h2>
+            <h2>{ACCOUNT_GROUP_LABEL.variable} <small>使った {money(v.U)}・予定 {money(v.P)}</small></h2>
             {shown.filter((c) => !c.fixed).map(catPanel)}
           </section>
           <section>
-            <h2>{ACCOUNT_GROUP_LABEL.fixed} <small>見込み {money(v.base.fixed)}・（）内は予定</small></h2>
+            <h2>{ACCOUNT_GROUP_LABEL.fixed} <small>見込み {money(v.base.fixed)}</small></h2>
             {shown.filter((c) => c.fixed).map(catPanel)}
           </section>
           {(v.outsideCards.length > 0 || v.outsideAccounts.length > 0) && (
