@@ -219,12 +219,17 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
           </div>
         </div>
         {v.T > 0 && <Bar budget={v.T} used={v.U} planned={v.P} />}
-        <button className="panel" onClick={() => go("settings")} style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit" }}>
-          <div className="legend" style={{ justifyContent: "space-between" }}><span>給与</span><b className="num">{yen(b.salary)}</b></div>
-          {b.extra !== 0 && <div className="legend" style={{ justifyContent: "space-between" }}><span>＋ 追加予算</span><b className="num">{yen(b.extra)}</b></div>}
-          <div className="legend" style={{ justifyContent: "space-between" }}><span>− 固定費（家賃・奨学金・通信・サブスクなど）</span><b className="num">{yen(b.fixed)}</b></div>
-          <div className="legend" style={{ justifyContent: "space-between" }}><span>− 目標用マイナス（リボの返済・貯金）</span><b className="num">{yen(b.goal)}</b></div>
-          <div className="note">タップすると設定で直せます</div>
+        <h2 style={{ marginTop: 16 }}>{label}の出し方 <small>タップすると設定で直せます</small></h2>
+        <button className="panel scroll" onClick={() => go("settings")} style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit", width: "100%" }}>
+          <table className="tbl">
+            <tbody>
+              <tr><td>給与</td><td className="num">{yen(b.salary)}</td></tr>
+              {b.extra !== 0 && <tr><td>＋ 追加予算（イベチケなど）</td><td className="num">{yen(b.extra)}</td></tr>}
+              <tr><td>− 固定費（家賃・奨学金・通信・サブスクなど）</td><td className="num">{yen(b.fixed)}</td></tr>
+              <tr><td>− 目標用マイナス（リボの返済・貯金）</td><td className="num">{yen(b.goal)}</td></tr>
+            </tbody>
+            <tfoot><tr><td>＝ {label}</td><td className="num">{signed(b.T)}</td></tr></tfoot>
+          </table>
         </button>
       </section>
 
