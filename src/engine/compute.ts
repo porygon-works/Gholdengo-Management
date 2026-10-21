@@ -1,6 +1,6 @@
 import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost } from "./schedule";
+import { cardOf, cardPayDate, closingFor, closingMonth, ownCost } from "./schedule";
 import {
   budgetCats, GOAL_KEY, isFixedCat, RESERVE,
   type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
@@ -60,7 +60,8 @@ export function billsFor(d: Data, payYm: string): Bill[] {
   return s.cards.map((c) => {
     const closingYm = closingFor(payYm, s, c.id);
     const date = cardPayDate(closingYm, s, c.id);
-    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && cardOf(s, e.card).id === c.id && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
+    // 分割（返済）は引落日の日付で持つので、引落月で入れる。ほかは利用日の締め月で入れる
+    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && cardOf(s, e.card).id === c.id && (e.group === "installment" ? ymOf(e.date) === payYm : closingMonth(e.date, s, c.id) === closingYm)).sort((a, b) => a.date.localeCompare(b.date));
     const estimate = items.reduce((a, e) => a + e.amount, 0);
     const row = d.accounts.find((e) => e.source_ref === billRef(c.id, date)) ?? null;
     const amount = row && (row.status === "confirmed" || row.locked) ? row.amount : estimate;
@@ -163,8 +164,8 @@ export const lumpRef = (g: Goal, date: string) => `goal:${g.id}:lump:${date}`;
 
 /**
  * 返済の目標から、まだ作っていない返済の予定を作る（§3.4）。
- * カードがあればクレカ明細（分割（返済））、なければ口座明細の出金。臨時の返済は口座明細の出金。
- * 同じカードの同じ締め月に分割（返済）の明細がもうあれば（定期のお金や前の版から来たもの）、作らない
+ * カードがあればクレカ明細（分割（返済）。日付は引落日）、なければ口座明細の出金。臨時の返済は口座明細の出金。
+ * 同じカードの同じ引落月に分割（返済）の明細がもうあれば（定期のお金や前の版から来たもの）、作らない
  */
 export function missingGoalPlans(d: Data, months: string[]) {
   const s = d.settings;
@@ -178,9 +179,8 @@ export function missingGoalPlans(d: Data, months: string[]) {
       if (m.pay > 0 && !have.has(goalRef(g, m.ym))) {
         if (g.card) {
           const c = cardOf(s, g.card).id;
-          const cym = closingFor(m.ym, s, c);
-          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && closingMonth(e.date, s, c) === cym && (!e.goal_id || e.goal_id === g.id));
-          if (!dup) cards.push({ card: c, status: "plan", date: closingEnd(cym, s, c), amount: m.pay, group: "installment", category: null, name: `${g.name}の返済`, shop: "", memo: "", tatekae: 0, source: "goal", source_ref: goalRef(g, m.ym), merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: g.id });
+          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && ymOf(e.date) === m.ym && (!e.goal_id || e.goal_id === g.id));
+          if (!dup) cards.push({ card: c, status: "plan", date: goalPayDate(g, m.ym, s), amount: m.pay, group: "installment", category: null, name: `${g.name}の返済`, shop: "", memo: "", tatekae: 0, source: "goal", source_ref: goalRef(g, m.ym), merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: g.id });
         } else {
           accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}の返済`, memo: "", date: goalPayDate(g, m.ym, s), amount: m.pay, source: "goal", source_ref: goalRef(g, m.ym), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
         }
@@ -401,7 +401,7 @@ export interface Payment {
 
 /**
  * 来月の支払い予定（§5.6）：来月 ym に口座から出るお金を、引落日の順に1件ずつ。
- * クレカ支払いは、中身を「固定費（費目ごと）・分割の返済（1件ずつ）・変動費（合計）・立替（合計）」に分ける
+ * クレカ支払いは、中身を大費目ごとの合計（固定費・変動費・分割の返済・立替）に分ける
  */
 export function nextPayments(d: Data, ym: string, today: string): { ym: string; rows: Payment[]; total: number } {
   const bills = billsFor(d, ym);
@@ -410,18 +410,15 @@ export function nextPayments(d: Data, ym: string, today: string): { ym: string; 
     const b = e.group === "card" ? bills.find((x) => x.card.id === e.card && x.date === e.date) : undefined;
     const parts: PaymentPart[] = [];
     if (b) {
-      const title = (x: CardEntry) => x.name || x.category || x.shop || "クレカ";
-      let variable = 0, tatekae = 0;
-      const fixed = new Map<string, number>();
+      // 大費目ごとの合計（一部の立替は立替に数える）
+      const sum = { fixed: 0, variable: 0, installment: 0, tatekae: 0 };
       for (const x of b.items) {
-        if (x.group === "fixed") { const k = x.category || title(x); fixed.set(k, (fixed.get(k) || 0) + ownCost(x)); tatekae += x.amount - ownCost(x); }
-        else if (x.group === "variable") { variable += ownCost(x); tatekae += x.amount - ownCost(x); }
-        else if (x.group === "installment") parts.push({ label: `分割の返済：${title(x)}`, amount: x.amount });
-        else tatekae += x.amount;
+        if (x.group === "fixed" || x.group === "variable") { sum[x.group] += ownCost(x); sum.tatekae += x.amount - ownCost(x); }
+        else if (x.group === "installment") sum.installment += x.amount;
+        else sum.tatekae += x.amount;
       }
-      parts.unshift(...[...fixed].map(([k, v]) => ({ label: `固定費：${k}`, amount: v })));
-      if (variable) parts.push({ label: "変動費（食料品・外食など）", amount: variable });
-      if (tatekae) parts.push({ label: "立替", amount: tatekae });
+      const labels = [["fixed", "固定費"], ["variable", "変動費"], ["installment", "分割の返済"], ["tatekae", "立替"]] as const;
+      for (const [k, label] of labels) if (sum[k]) parts.push({ label, amount: sum[k] });
       if (b.amount !== b.estimate) parts.push({ label: "確定の額との差", amount: b.amount - b.estimate });
     }
     const amount = b ? b.amount : e.amount;
