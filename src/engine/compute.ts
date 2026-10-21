@@ -170,8 +170,13 @@ export const lumpRef = (g: Goal, date: string) => `goal:${g.id}:lump:${date}`;
  * 同じカードの同じ締め月に分割（返済）の明細がもうあれば（定期のお金や前の版から来たもの）、作らない
  */
 export function missingGoalPlans(d: Data, months: string[]) {
-  const s = d.settings;
   const have = new Set([...d.accounts, ...d.cards].map((e) => e.source_ref).filter(Boolean).concat(d.removedRefs ?? []));
+  return goalPlans(d, months, have);
+}
+
+/** 目標から作る返済の予定（skip にある source_ref は除く） */
+function goalPlans(d: Data, months: string[], have: Set<string | null>) {
+  const s = d.settings;
   const accounts: Omit<AccountEntry, "id">[] = [];
   const cards: Omit<CardEntry, "id">[] = [];
   for (const g of d.goals) {
@@ -182,7 +187,7 @@ export function missingGoalPlans(d: Data, months: string[]) {
         if (g.card) {
           const c = cardOf(s, g.card).id;
           const cym = closingFor(m.ym, s, c);
-          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && closingMonth(e.date, s, c) === cym && (!e.goal_id || e.goal_id === g.id));
+          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && closingMonth(e.date, s, c) === cym && (!e.goal_id || e.goal_id === g.id) && e.source_ref !== goalRef(g, m.ym));
           if (!dup) cards.push({ card: c, status: "plan", date: closingEnd(cym, s, c), amount: m.pay, group: "installment", category: null, name: `${g.name}の返済`, shop: "", memo: "", tatekae: 0, source: "goal", source_ref: goalRef(g, m.ym), merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: g.id });
         } else {
           accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}の返済`, memo: "", date: goalPayDate(g, m.ym, s), amount: m.pay, source: "goal", source_ref: goalRef(g, m.ym), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
@@ -202,6 +207,30 @@ export function missingGoalPlans(d: Data, months: string[]) {
     }
   }
   return { accounts, cards };
+}
+
+/**
+ * 目標から作った返済の予定（予定のまま・本人が直していないもの）の額を、目標マスタに合わせる。
+ * 残高・毎月の額・臨時の返済を直したり、前の月の返済で残りが減ったりしたとき、出金予定の額も変わる。
+ * 返す額がなくなった予定（残高が0になったあとの月など）は消す
+ */
+export function syncGoalPlans(d: Data, months: string[]) {
+  const want = goalPlans(d, months, new Set(d.removedRefs ?? []));
+  const amount = new Map([...want.accounts, ...want.cards].map((e) => [e.source_ref, e.amount]));
+  const updates: { table: "account_entries" | "card_entries"; id: string; amount: number }[] = [];
+  const removes: { table: "account_entries" | "card_entries"; id: string }[] = [];
+  const check = (table: "account_entries" | "card_entries", e: AccountEntry | CardEntry) => {
+    if (e.source !== "goal" || e.status !== "plan" || e.locked || !e.source_ref) return;
+    // 毎月の返済は source_ref の月（goal:id:YYYY-MM）、臨時の返済はその日の月で、見ている月の中だけ
+    const ym = /:(\d{4}-\d{2})$/.exec(e.source_ref)?.[1] ?? ymOf(e.date);
+    if (!months.includes(ym)) return;
+    const a = amount.get(e.source_ref);
+    if (!a) removes.push({ table, id: e.id });
+    else if (a !== e.amount) updates.push({ table, id: e.id, amount: a });
+  };
+  for (const e of d.accounts) check("account_entries", e);
+  for (const e of d.cards) if (isLive(e)) check("card_entries", e);
+  return { updates, removes };
 }
 
 /**
