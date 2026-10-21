@@ -55,7 +55,7 @@ export function missingRecurring(recurring: Recurring[], entries: Entry[], month
       if (have.has(ref)) continue;
       out.push({
         kind: r.kind, status: "plan", date: recurringDate(r, ym), amount: r.amount, method: r.method,
-        category: r.kind === "income" ? null : r.category, shop: "", item: r.name, memo: "", tatekae: 0,
+        category: r.kind === "income" ? null : r.category, shop: r.shop || "", item: r.name, memo: "", tatekae: 0,
         source: "recurring", source_ref: ref, merged_into: null, recurring_id: r.id, not_dup: [], locked: false,
       });
     }

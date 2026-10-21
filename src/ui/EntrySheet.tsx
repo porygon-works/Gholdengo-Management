@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { budgetCats, FIXED_DEBIT, OUTSIDE, todayJST, type Entry, type Kind, type Method, type Status } from "../engine";
+import { addDays, budgetCats, FIXED_DEBIT, OUTSIDE, todayJST, type Entry, type Kind, type Method, type Status } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { ALL_METHODS, Field, md, METHOD_LABEL, NumInput, Select, Sheet, SOURCE_LABEL, STATUS_LABEL, StatusChip, toast, yen, entryTitle } from "./common";
 
@@ -30,6 +30,11 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
   const [item, setItem] = useState(base.item);
   const [memo, setMemo] = useState(base.memo);
   const [tatekae, setTatekae] = useState<number | "">(base.tatekae || "");
+  // 立替を増やしたら、返してもらう分を入金の予定として作る（返してもらうまで、立替の分は口座から出たままなので）
+  const [refund, setRefund] = useState(true);
+  const [refundDate, setRefundDate] = useState(addDays(todayJST(), 7));
+  const [refundMethod, setRefundMethod] = useState<Method>("cash");
+  const addedTatekae = (Number(tatekae) || 0) - (base.tatekae || 0);
 
   const absorbed = entry ? data.entries.filter((e) => e.merged_into === entry.id) : [];
   const keeper = entry?.merged_into ? data.entries.find((e) => e.id === entry.merged_into) : undefined;
@@ -40,7 +45,12 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
     if (!amount || !date) { toast("日付と金額を入れてください"); return; }
     const category = kind === "expense" && cat !== UNC ? cat : null;
     const v = { kind, status, date, amount, method, category, shop, item, memo, tatekae: tatekae || 0 };
-    const ok = await store.run(() => (entry ? actions.updateEntry(data, entry.id, v) : actions.addEntry(v)));
+    const ok = await store.run(async () => {
+      await (entry ? actions.updateEntry(data, entry.id, v) : actions.addEntry(v));
+      if (kind === "expense" && addedTatekae > 0 && refund) {
+        await actions.addEntry({ kind: "income", status: "plan", date: refundDate, amount: addedTatekae, method: refundMethod, category: null, item: `立替の返金（${item || shop || "支出"}）` });
+      }
+    });
     if (ok) { toast(entry ? "保存しました" : "追加しました"); onClose(); }
   };
   const remove = async () => {
@@ -83,6 +93,18 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
       <Field label={kind === "income" ? "内容（例：給与・賞与・立替の返金）" : "買ったもの"}><input value={item} onChange={(e) => setItem(e.target.value)} /></Field>
       {kind === "expense" && <Field label="お店" hint={fromMail ? "メールから入ったお店の名前。費目を直すと、このお店のルールとして覚えます" : undefined}><input value={shop} onChange={(e) => setShop(e.target.value)} /></Field>}
       {kind === "expense" && <Field label="立替額（あとで返してもらう分）" hint="入れると、自分の分だけを予算に数えます"><NumInput value={tatekae} onChange={setTatekae} /></Field>}
+      {kind === "expense" && addedTatekae > 0 && (
+        <div className="panel">
+          <label className="check"><input type="checkbox" checked={refund} onChange={(e) => setRefund(e.target.checked)} />返してもらう {yen(addedTatekae)}円 を入金の予定に入れる</label>
+          {refund && (
+            <div className="grid2">
+              <Field label="返してもらう日（見込み）"><input type="date" value={refundDate} onChange={(e) => setRefundDate(e.target.value)} /></Field>
+              <Field label="受け取り方"><Select value={refundMethod} options={["cash", "paypay", "bank"] as Method[]} labels={METHOD_LABEL} onChange={setRefundMethod} /></Field>
+            </div>
+          )}
+          <div className="note">返してもらうまでは、立替の分も口座から出たままなので、残り予算はその分少なく出ます。入金の予定を入れると戻ります。</div>
+        </div>
+      )}
       <Field label="メモ"><textarea rows={2} value={memo} onChange={(e) => setMemo(e.target.value)} /></Field>
       <div className="btns">
         <button className="btn" onClick={save}>保存</button>

@@ -1,14 +1,16 @@
 import { isLive, ymOf, type Entry } from "../engine";
 import type { AppData } from "../data/store";
-import { Empty, signed, yen } from "./common";
+import { Empty, signed, yen, ymLabel } from "./common";
 import { EntryRow } from "./Ledger";
 
-export function Plans({ data, today, onOpen, onAdd }: { data: AppData; today: string; onOpen: (e: Entry) => void; onAdd: (kind: "income" | "expense") => void }) {
+/** 予定の画面。ヘッダーの月で切り替える。今月を見ているときは、日付が過ぎた予定も上に出す */
+export function Plans({ data, month, today, onOpen, onAdd }: { data: AppData; month: string; today: string; onOpen: (e: Entry) => void; onAdd: (kind: "income" | "expense") => void }) {
   const plans = data.entries.filter((e) => isLive(e) && e.status === "plan").sort((a, b) => a.date.localeCompare(b.date));
-  const overdue = plans.filter((e) => e.date < today);
-  const coming = plans.filter((e) => e.date >= today);
-  const months = [...new Set(coming.map((e) => ymOf(e.date)))];
-  const sum = (xs: Entry[]) => xs.reduce((a, e) => a + (e.kind === "income" ? e.amount : -e.amount), 0);
+  const current = month === ymOf(today);
+  const overdue = current ? plans.filter((e) => e.date < today) : [];
+  const xs = plans.filter((e) => ymOf(e.date) === month && !(current && e.date < today));
+  const inc = xs.filter((e) => e.kind === "income"), exp = xs.filter((e) => e.kind !== "income");
+  const total = (ys: Entry[]) => ys.reduce((a, e) => a + e.amount, 0);
 
   return (
     <>
@@ -25,17 +27,15 @@ export function Plans({ data, today, onOpen, onAdd }: { data: AppData; today: st
           <div className="panel"><div className="list">{overdue.map((e) => <EntryRow key={e.id} e={e} onOpen={onOpen} showCat />)}</div></div>
         </section>
       )}
-      {!plans.length && <Empty>予定はありません</Empty>}
-      {months.map((ym) => {
-        const xs = coming.filter((e) => ymOf(e.date) === ym);
-        const inc = xs.filter((e) => e.kind === "income"), exp = xs.filter((e) => e.kind !== "income");
-        return (
-          <section key={ym}>
-            <h2>{+ym.slice(5)}月 <small>入金 {yen(inc.reduce((a, e) => a + e.amount, 0))}・出費 {yen(exp.reduce((a, e) => a + e.amount, 0))}・差 {signed(sum(xs))}</small></h2>
-            <div className="panel"><div className="list">{xs.map((e) => <EntryRow key={e.id} e={e} onOpen={onOpen} showCat />)}</div></div>
-          </section>
-        );
-      })}
+      <section>
+        <h2>{ymLabel(month)}{current ? "（今日から）" : ""} <small>入金 {yen(total(inc))}・出費 {yen(total(exp))}・差 {signed(total(inc) - total(exp))}</small></h2>
+        {xs.length ? (
+          <>
+            {inc.length > 0 && <div className="panel"><div className="note">入金</div><div className="list">{inc.map((e) => <EntryRow key={e.id} e={e} onOpen={onOpen} />)}</div></div>}
+            {exp.length > 0 && <div className="panel"><div className="note">出費</div><div className="list">{exp.map((e) => <EntryRow key={e.id} e={e} onOpen={onOpen} showCat />)}</div></div>}
+          </>
+        ) : <Empty>この月の予定はありません</Empty>}
+      </section>
     </>
   );
 }

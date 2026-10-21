@@ -74,7 +74,7 @@ export function Passbook({ data, today }: { data: AppData; today: string }) {
             {pb.rows.map((r, i) => (
               <tr key={i}>
                 <td className="num">{md(r.date)}</td>
-                <td className="memo">{r.label}{r.count > 1 && <span className="note">（明細 {r.count}件）</span>}{r.entry?.status === "plan" && <> <Chip kind="warn">予定</Chip></>}{r.bill && <> <Chip kind="ok">請求額</Chip></>}</td>
+                <td className="memo">{r.label}{r.count > 1 && <span className="note">（明細 {r.count}件）</span>}{r.entry?.status === "plan" && <> <Chip kind="warn">予定</Chip></>}{r.bill && <> <Chip kind="ok">請求額</Chip>{r.cardSum != null && r.cardSum !== -r.delta && <div className="note">明細の合計 {yen(r.cardSum)}円（差 {signed(-r.delta - r.cardSum)}円。入っていない明細があるかもしれません）</div>}</>}</td>
                 <td className="num">{r.delta < 0 ? yen(-r.delta) : ""}</td>
                 <td className="num pos">{r.delta > 0 ? yen(r.delta) : ""}</td>
                 <td className={`num ${r.balance < 0 ? "neg" : ""}`}>{signed(r.balance)}</td>

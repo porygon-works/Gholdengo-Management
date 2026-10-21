@@ -179,6 +179,7 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
         <Field label="金種"><Select value={(x.method ?? "bank") as Method} options={ALL_METHODS} labels={METHOD_LABEL} onChange={(v) => set({ method: v })} /></Field>
       </div>
       {x.kind === "expense" && <Field label="費目" hint="家賃などの予算に入れない引落は「固定引落」"><Select value={x.category ?? ""} options={cats} labels={{ "": "未分類" }} onChange={(v) => set({ category: v || null })} /></Field>}
+      {x.kind === "expense" && x.method === "card" && <Field label="お店の名前のヒント（なくてもよい）" hint="カードの明細のお店にこの言葉が入っていれば、費目が違ってもこの予定とまとめます（例：モバイルSuica）"><input value={x.shop ?? ""} onChange={(e) => set({ shop: e.target.value })} /></Field>}
       <div className="grid2">
         <Field label="始める月（空なら今から）"><input type="month" value={x.start_month ?? ""} onChange={(e) => set({ start_month: e.target.value || null })} /></Field>
         <Field label="終わる月（空ならずっと）"><input type="month" value={x.end_month ?? ""} onChange={(e) => set({ end_month: e.target.value || null })} /></Field>

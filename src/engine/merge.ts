@@ -1,4 +1,5 @@
 import { daysBetween } from "./dates";
+import { normalizeShop } from "./rules";
 import type { Entry } from "./types";
 
 // 重複の処理（仕様書 §6）。信頼度の高い明細が、低い明細を吸収する
@@ -34,16 +35,16 @@ function match(hi: Entry, lo: Entry): Match {
   if (hi.kind !== lo.kind || notDup(hi, lo)) return null;
   const d = absDays(hi, lo);
   if (lo.status === "plan") {
-    // 定期のお金の予定と金種・金額がぴったり同じなら、費目は問わない（定期代のSuicaが「交通」で入るときなど）
-    if (lo.source === "recurring" && hi.method === lo.method && hi.amount === lo.amount && d <= 7) return "auto";
-    // ほかの予定は金種を問わない
-    // 費目はどちらかが未分類なら問わない
-    if (hi.category && lo.category && hi.category !== lo.category) return null;
-    // 見込みの金額なので ±20% まで。ただし 3,000円未満は取り違えやすい（サブスクなど）ので、ぴったりのときだけ
+    // 予定は金種を問わない。見込みの金額なので ±20% まで。ただし 3,000円未満は取り違えやすい（サブスクなど）ので、ぴったりのときだけ
     const ratio = lo.amount > 0 ? Math.abs(hi.amount - lo.amount) / lo.amount : 1;
     const tol = lo.amount >= 3000 ? 0.2 : 0;
-    if (d <= 7 && ratio <= tol) return "auto";
-    return null;
+    if (d > 7 || ratio > tol) return null;
+    // 予定に「お店の名前のヒント」があり、明細のお店に入っていれば、費目が違ってもまとめる（定期代のSuicaが「交通」で入るときなど）
+    const hint = normalizeShop(lo.shop);
+    if (hint && normalizeShop(hi.shop).includes(hint)) return "auto";
+    // それ以外は、費目が同じか、どちらかが未分類のときだけ
+    if (hi.category && lo.category && hi.category !== lo.category) return null;
+    return "auto";
   }
   if (hi.method !== lo.method) return null;
   if (hi.amount === lo.amount) {

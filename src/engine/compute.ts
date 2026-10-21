@@ -27,6 +27,7 @@ export interface AssetEvent {
   label: string;
   entry?: Entry;
   bill?: boolean;
+  cardSum?: number; // 請求額で置きかえたときの、その日のクレカ明細の合計
 }
 
 export interface Projection {
@@ -45,22 +46,23 @@ export function projection(d: Data, today: string): Projection | null {
     if (!isLive(e)) continue;
     let cd = cashDate(e, s);
     if (!cd) continue;
-    if (e.status === "plan") {
-      // まだ起きていない予定は、遅れていても今日以降に起きるものとして数える
-      if (cd < soon) cd = soon;
-    }
+    // 残高の報告日までに資産が動くはずだった分は、起きていれば報告した残高に入っている。二重に数えない
+    // （予定のまま残っていても、画面には「日付が過ぎた予定」として出るので、本人が確定か削除をする）
     if (cd <= base.date) continue;
+    // 報告日より後で、まだ起きていない予定は、遅れていても今日以降に起きるものとして数える
+    if (e.status === "plan" && cd < soon) cd = soon;
     const label = e.item || e.shop || (e.kind === "income" ? "入金" : "支出");
     events.push({ date: cd, delta: e.kind === "income" ? e.amount : -e.amount, label, entry: e });
   }
   // カード請求額が分かっている引落日は、明細の合計の代わりに請求額で数える
   for (const b of d.cardBills) {
     if (b.pay_date <= base.date) continue;
+    let cardSum = 0;
     for (let i = events.length - 1; i >= 0; i--) {
       const ev = events[i];
-      if (ev.date === b.pay_date && ev.entry?.method === "card" && ev.entry.kind === "expense") events.splice(i, 1);
+      if (ev.date === b.pay_date && ev.entry?.method === "card" && ev.entry.kind === "expense") { cardSum -= ev.delta; events.splice(i, 1); }
     }
-    events.push({ date: b.pay_date, delta: -b.amount, label: "クレカ引落（請求額）", bill: true });
+    events.push({ date: b.pay_date, delta: -b.amount, label: "クレカ引落（請求額）", bill: true, cardSum });
   }
   const isCard = (e: AssetEvent) => (e.entry?.method === "card" ? 1 : 0);
   events.sort((a, b) => a.date.localeCompare(b.date) || Math.sign(b.delta) - Math.sign(a.delta) || isCard(a) - isCard(b));

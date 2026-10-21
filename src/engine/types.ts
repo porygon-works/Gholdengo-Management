@@ -49,6 +49,7 @@ export interface Recurring {
   day: number; // 1〜31。月末より大きければ月末
   shift: "next" | "prev" | "none"; // 土日祝のずらし方
   method: Method;
+  shop: string; // お店の名前のヒント。カードの明細のお店にこれが入っていれば、費目が違ってもこの予定とまとめる
   start_month: string | null; // YYYY-MM
   end_month: string | null;
   active: boolean;

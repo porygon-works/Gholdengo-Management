@@ -15,7 +15,7 @@ import { SettingsView } from "./Settings";
 
 type Screen = "home" | "ledger" | "plans" | "settings" | "review" | "goals" | "passbook";
 const TITLES: Record<Screen, string> = { home: "ダッシュボード", ledger: "明細", plans: "予定", settings: "設定", review: "要確認", goals: "目標", passbook: "口座の見通し" };
-const WITH_MONTH: Screen[] = ["home", "ledger", "settings"];
+const WITH_MONTH: Screen[] = ["home", "ledger", "plans", "settings"];
 
 const ICONS = {
   home: <path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
@@ -84,7 +84,7 @@ function Main() {
               else go(to);
             }} />}
             {screen === "ledger" && <Ledger data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "entry" })} />}
-            {screen === "plans" && <Plans data={data} today={today} onOpen={openEntry} onAdd={(kind) => setSheet({ type: "entry", preset: { kind, status: "plan", method: kind === "income" ? "bank" : "card" } })} />}
+            {screen === "plans" && <Plans data={data} month={month} today={today} onOpen={openEntry} onAdd={(kind) => setSheet({ type: "entry", preset: { kind, status: "plan", method: kind === "income" ? "bank" : "card" } })} />}
             {screen === "settings" && <SettingsView store={store} data={data} month={month} />}
             {screen === "review" && <ReviewView store={store} data={data} today={today} onOpen={openEntry} />}
             {screen === "goals" && <Goals data={data} today={today} />}
