@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { accountFlow, addDays, addMonths, budgetCats, computeMonth, groupOfCat, nextPayments, RESERVE, ymOf, type AccountEntry } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { accountTitle, Bar, cardOfPay, Chip, Field, md, NumInput, payLabels, payOptions, Select, signed, toast, yen, ymLabel, type Pay } from "./common";
@@ -126,26 +126,39 @@ function AccountFlow({ data, today, go, open }: { data: AppData; today: string; 
   );
 }
 
-/** 来月の支払い予定（§5.6） */
-function NextMonth({ data, month }: { data: AppData; month: string }) {
-  const n = nextPayments(data, addMonths(month, 1));
+/** 来月の支払い予定（§5.6）：来月に口座から出るお金を引落日の順に。クレカ支払いは中身を下に出す */
+function NextMonth({ data, month, today, open }: { data: AppData; month: string; today: string; open: Props["open"] }) {
+  const n = nextPayments(data, addMonths(month, 1), today);
   const cur = +month.slice(5);
-  const rows: [string, number][] = [
-    ["そのほか（分割・立替）", n.other],
-    ["口座からの出金予定（奨学金・共済など）", n.accountOut],
-    [`クレカの変動費（${cur}月の使った＋予定）`, n.cardVar],
-    [`クレカの固定費（${cur}月の家賃など）`, n.cardFixed],
-  ];
   return (
     <section>
       <h2>来月の支払い予定 <small>{ymLabel(n.ym)}に口座から出るお金</small></h2>
       <div className="panel scroll">
-        <table className="tbl">
-          <thead><tr><th>項目</th><th>金額</th></tr></thead>
-          <tbody>{rows.map(([k, v]) => <tr key={k}><td>{k}</td><td className="num">{yen(v)}</td></tr>)}</tbody>
-          <tfoot><tr><td>計</td><td className="num">{yen(n.total)}</td></tr></tfoot>
-        </table>
-        <div className="note">クレカの分は、{cur}月にこれからカードで使うと増えます。</div>
+        {n.rows.length ? (
+          <table className="tbl">
+            <thead><tr><th>日</th><th style={{ textAlign: "left" }}>内容</th><th>金額</th></tr></thead>
+            <tbody>
+              {n.rows.map((r) => (
+                <Fragment key={r.entry.id}>
+                  <tr className="tap" onClick={() => open(r.entry)}>
+                    <td className="num">{md(r.date)}</td>
+                    <td style={{ textAlign: "left" }}><b>{r.name}</b> {r.state !== "確定" && <Chip kind="warn">{r.state}</Chip>}</td>
+                    <td className="num"><b>{yen(r.amount)}</b></td>
+                  </tr>
+                  {r.parts.map((p) => (
+                    <tr key={p.label} className="sub">
+                      <td />
+                      <td style={{ textAlign: "left", paddingLeft: 16 }} className="note">└ {p.label}</td>
+                      <td className="num note">{signed(p.amount)}</td>
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+            </tbody>
+            <tfoot><tr><td /><td style={{ textAlign: "left" }}>計</td><td className="num">{yen(n.total)}</td></tr></tfoot>
+          </table>
+        ) : <div className="note">来月に口座から出るお金の予定はまだありません</div>}
+        <div className="note">クレカの請求は、{cur}月にカードで使った分（予定を含む）です。これからカードで使うと増えます。行をタップすると詳細を見られます。</div>
       </div>
     </section>
   );
@@ -248,7 +261,7 @@ export function Dashboard({ store, data, month, today, reviews, go, open }: Prop
         </div>
       </section>
 
-      <NextMonth data={data} month={month} />
+      <NextMonth data={data} month={month} today={today} open={open} />
     </>
   );
 }
