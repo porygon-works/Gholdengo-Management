@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { addMonths, todayJST, ymOf, type Entry } from "../engine";
+import { addMonths, todayJST, ymOf } from "../engine";
 import { backend, supabase } from "../data/backend";
 import { useStore } from "../data/store";
 import { Toaster, ymLabel } from "./common";
 import { Dashboard } from "./Dashboard";
-import { EntrySheet } from "./EntrySheet";
-import { BalanceSheet, Goals, Passbook } from "./Goals";
+import { AccountSheet, CardSheet, NewSheet, type Open } from "./Sheets";
+import { BalanceSheet, GoalsView, Passbook } from "./Goals";
 import { Ledger } from "./Ledger";
 import { Login } from "./Login";
 import { Plans } from "./Plans";
@@ -16,7 +16,7 @@ import { reviewCount, ReviewView } from "./Review";
 import { SettingsView } from "./Settings";
 
 type Screen = "home" | "ledger" | "plans" | "settings" | "review" | "goals" | "passbook" | "planner";
-const TITLES: Record<Screen, string> = { home: "ダッシュボード", ledger: "明細", plans: "予定", settings: "設定", review: "要確認", goals: "目標", passbook: "口座の見通し", planner: "計画をつくる" };
+const TITLES: Record<Screen, string> = { home: "ダッシュボード", ledger: "明細", plans: "予定", settings: "設定", review: "要確認", goals: "目標の見通し", passbook: "口座の見通し", planner: "計画をつくる" };
 const WITH_MONTH: Screen[] = ["home", "ledger", "plans", "settings"];
 
 const ICONS = {
@@ -26,7 +26,7 @@ const ICONS = {
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></>,
 };
 
-type SheetState = { type: "entry"; entry?: Entry; preset?: Partial<Entry> } | { type: "balance" } | null;
+type SheetState = Open | { type: "balance" } | null;
 
 export function App() {
   const [session, setSession] = useState<Session | null | undefined>(supabase ? undefined : null);
@@ -54,7 +54,7 @@ function Main() {
   useEffect(() => { try { localStorage.setItem("gholdengo.screen", screen); } catch { /* なし */ } }, [screen]);
   const go = (s: Screen) => { setScreen(s); setMenu(false); window.scrollTo(0, 0); };
   const reviews = data ? reviewCount(data, today) : 0;
-  const openEntry = (entry: Entry) => setSheet({ type: "entry", entry });
+  const openEntry = (o: Open) => setSheet(o);
 
   const sub = loading && !data ? "読み込み中…" : error ? "保存か読み込みに失敗しました" : backend.mode === "local" ? "お試しモード（この端末だけに保存）" : `今日 ${+today.slice(5, 7)}/${+today.slice(8)}`;
 
@@ -84,13 +84,13 @@ function Main() {
               if (to === "balance") setSheet({ type: "balance" });
               else if (to === "ledger") { setFocusCat(cat ?? null); go("ledger"); }
               else go(to);
-            }} />}
-            {screen === "ledger" && <Ledger data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "entry" })} />}
-            {screen === "plans" && <Plans data={data} month={month} today={today} onOpen={openEntry} onAdd={(kind) => setSheet({ type: "entry", preset: { kind, status: "plan", method: kind === "income" ? "bank" : "card" } })} />}
+            }} open={(entry) => setSheet({ type: "account", entry })} />}
+            {screen === "ledger" && <Ledger data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "new" })} />}
+            {screen === "plans" && <Plans data={data} month={month} today={today} onOpen={openEntry} onAdd={() => setSheet({ type: "new", plan: true })} />}
             {screen === "settings" && <SettingsView store={store} data={data} month={month} />}
             {screen === "review" && <ReviewView store={store} data={data} today={today} onOpen={openEntry} />}
-            {screen === "goals" && <Goals data={data} today={today} />}
-            {screen === "passbook" && <Passbook data={data} today={today} />}
+            {screen === "goals" && <GoalsView data={data} today={today} />}
+            {screen === "passbook" && <Passbook data={data} today={today} onOpen={openEntry} />}
             {screen === "planner" && <Planner store={store} data={data} today={today} />}
           </main>
         )}
@@ -109,7 +109,7 @@ function Main() {
           <div className="drawerbg" onClick={() => setMenu(false)} />
           <nav className="drawer" aria-label="メニュー">
             <h3>メニュー</h3>
-            <button onClick={() => { setMenu(false); setSheet({ type: "balance" }); }}>残高を入れる</button>
+            <button onClick={() => { setMenu(false); setSheet({ type: "balance" }); }}>口座と財布（残高を直す・ATM）</button>
             <button onClick={() => go("review")}>要確認 <span className="num">{reviews || ""}</span></button>
             <button onClick={() => go("passbook")}>口座の見通し（通帳）</button>
             <button onClick={() => go("planner")}>計画をつくる（リボ返済・貯金）</button>
@@ -123,7 +123,9 @@ function Main() {
         </>
       )}
 
-      {data && sheet?.type === "entry" && <EntrySheet store={store} data={data} entry={sheet.entry} preset={sheet.preset} onClose={() => setSheet(null)} />}
+      {data && sheet?.type === "new" && <NewSheet store={store} data={data} plan={sheet.plan} onClose={() => setSheet(null)} />}
+      {data && sheet?.type === "card" && <CardSheet store={store} data={data} entry={sheet.entry} preset={sheet.preset} onClose={() => setSheet(null)} />}
+      {data && sheet?.type === "account" && <AccountSheet store={store} data={data} entry={sheet.entry} preset={sheet.preset} onClose={() => setSheet(null)} />}
       {data && sheet?.type === "balance" && <BalanceSheet store={store} data={data} today={today} onClose={() => setSheet(null)} />}
       <Toaster />
     </>

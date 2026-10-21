@@ -14,10 +14,13 @@
  *   - 毎回、直近3日の vpass.ne.jp からのメールをすべて読む（Gmail のラベルはスレッド単位なので使わない）
  *   - メールID＋何件目か を source_ref にして入れる。DB で重複禁止にしているので、何度読んでも二重にならない
  *   - 重複のまとめ（速報と確定明細、手入力との照合）はアプリが開いたときに行う。ここでは読んで入れるだけ
+ *   - v3：利用はクレカ明細（card_entries）に、お支払い金額は口座明細（account_entries）の「クレカ支払い」の行に入れる
  */
 
 var SENDER = 'from:vpass.ne.jp';
 var SCHEMA = 'ggmg';
+var CARD = 'smbc'; // アプリの設定のカードの id（1枚目のカード）
+var CARD_NAME = '三井';
 
 function setup() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'run') ScriptApp.deleteTrigger(t); });
@@ -55,18 +58,31 @@ function ingest_(range) {
       var r = parseMessage(m.getSubject(), m.getPlainBody(), m.getDate(), m.getId());
       if (!r) return; // 家計簿に関係ないメール（認証コードなど）
       if (r.error) { reviews.push({ user_id: c.owner, kind: 'mail', title: m.getSubject(), body: r.error + '\n\n' + m.getPlainBody().slice(0, 1500), source_ref: 'mail:' + m.getId() }); return; }
-      (r.entries || []).forEach(function (e) {
-        e.user_id = c.owner;
-        e.category = categorize(e.shop, rules);
-        entries.push(e);
-      });
-      (r.bills || []).forEach(function (b) { b.user_id = c.owner; bills.push(b); });
+      (r.entries || []).forEach(function (e) { entries.push(toCardEntry_(e, c.owner, rules)); });
+      (r.bills || []).forEach(function (b) { bills.push(toBillRow_(b, c.owner)); });
     });
   });
-  if (entries.length) post_(c, 'entries', entries, 'user_id,source_ref', 'ignore-duplicates');
-  if (bills.length) post_(c, 'card_bills', bills, 'user_id,pay_date', 'merge-duplicates');
+  if (entries.length) post_(c, 'card_entries', entries, 'user_id,source_ref', 'ignore-duplicates');
+  if (bills.length) post_(c, 'account_entries', bills, 'user_id,source_ref', 'merge-duplicates');
   if (reviews.length) post_(c, 'review', reviews, 'user_id,source_ref', 'ignore-duplicates');
   console.log('読んだスレッド ' + threads.length + '・明細 ' + entries.length + '・請求 ' + bills.length + '・読めない ' + reviews.length);
+}
+
+/** メールの1件をクレカ明細の行にする。大費目はアプリが費目から決める */
+function toCardEntry_(e, owner, rules) {
+  return {
+    user_id: owner, card: CARD, status: 'confirmed', date: e.date, amount: e.amount, group: 'variable', category: categorize(e.shop, rules),
+    name: '', shop: e.shop, memo: e.memo, tatekae: 0, source: e.source, source_ref: e.source_ref, locked: false, not_dup: [],
+  };
+}
+
+/** お支払い金額を、口座明細の「クレカ支払い」の行（確定）にする。アプリが作った予定の行と source_ref が同じなので上書きになる */
+function toBillRow_(b, owner) {
+  var m = +b.pay_date.slice(5, 7) - 1;
+  return {
+    user_id: owner, account: 'bank', direction: 'out', status: 'confirmed', group: 'card', category: null, name: CARD_NAME + ' ' + (m >= 1 ? m : m + 12) + '月分',
+    date: b.pay_date, amount: b.amount, source: 'card_bill', source_ref: 'bill:' + CARD + ':' + b.pay_date, card: CARD, locked: true, memo: '', pair_id: null,
+  };
 }
 
 function post_(c, table, rows, onConflict, resolution) {

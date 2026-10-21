@@ -1,251 +1,320 @@
-import { addDays, addMonths, dayOf, daysBetween, lastDay, shiftBusiness, ymOf } from "./dates";
+import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardOf, cardPayDate, cashDate, closingMonth, ownCost, walletDelta } from "./schedule";
-import { BASE_KEYS, budgetCats, INCOME_EXTRA, INCOME_SALARY, isFixedCat, nonBudgetCats, REPAY, RESERVE, type Balance, type BaseField, type BaseKey, type CardDef, type Data, type Entry, type Settings } from "./types";
+import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost } from "./schedule";
+import {
+  budgetCats, GOAL_KEY, isFixedCat, RESERVE,
+  type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
+} from "./types";
 
-// 仕様書 §5 の計算式
+// 計算式（仕様書 §5）。画面はここの関数だけを使い、自分では計算しない
 
-/** 予算でどの費目に数えるか。null は予算に数えない */
-export function budgetCat(e: Entry, s: Settings): string | null {
-  if (e.kind !== "expense" || !isLive(e) || e.method === "revo") return null;
-  if (e.category && nonBudgetCats.includes(e.category)) return null;
-  if (!e.category) return RESERVE;
-  return budgetCats(s).includes(e.category) ? e.category : RESERVE;
-}
+// ---------- 残高 ----------
 
-/** いちばん新しい残高の報告（同じ日なら、あとから入れたもの） */
+/** いちばん新しい残高の記録（同じ日なら、あとから入れたもの） */
 export function latestBalance(balances: Balance[]): Balance | null {
   let best: Balance | null = null;
   for (const b of balances) if (!best || b.date > best.date || (b.date === best.date && (b.at ?? "") >= (best.at ?? ""))) best = b;
   return best;
 }
 
-/** 見通しに使う残高は口座だけ（財布は別に数える） */
-export const balanceTotal = (b: Balance) => b.bank || 0;
+/** 残高の記録 base のあとに起きたことか。同じ日なら、記録のあとに入れたもの */
+const afterBase = (e: { date: string; at?: string }, base: Balance) => e.date > base.date || (e.date === base.date && !!e.at && !!base.at && e.at > base.at);
 
-/** 残高の報告 base のあとに起きたことか。同じ日なら、報告のあとに入れたもの */
-const afterBase = (date: string, e: Entry, base: Balance) => date > base.date || (date === base.date && e.date === date && !!e.at && !!base.at && e.at > base.at);
+const signedAmount = (e: AccountEntry) => (e.direction === "in" ? e.amount : -e.amount);
 
-export interface AssetEvent {
-  date: string;
-  delta: number;
-  label: string;
-  entry?: Entry;
-  bill?: boolean;
-  card?: string; // 請求額の行のカード
-  cardSum?: number; // 請求額で置きかえたときの、その日のクレカ明細の合計
-}
-
-export interface Projection {
-  base: Balance;
-  events: AssetEvent[]; // 日付順。同じ日は収入が先
-}
-
-/** 予測資産 A(t) の元になる出来事の並び（§5.1） */
-export function projection(d: Data, today: string): Projection | null {
+/**
+ * いまの口座と財布（§5.4）。最後に入れた（直した）残高に、そのあと今日までの確定した口座明細を足し引きする。
+ * rows は、そのあとの口座の動き（履歴）
+ */
+export function accountNow(d: Data, today: string) {
   const base = latestBalance(d.balances);
   if (!base) return null;
+  const done = d.accounts.filter((e) => e.status === "confirmed" && e.date <= today && afterBase(e, base)).sort(byDate);
+  let bank = base.bank || 0;
+  const rows: FlowRow[] = [];
+  for (const e of done.filter((e) => e.account === "bank")) { bank += signedAmount(e); rows.push({ date: e.date, entry: e, delta: signedAmount(e), balance: bank }); }
+  const wallet = done.filter((e) => e.account === "wallet").reduce((a, e) => a + signedAmount(e), base.cash || 0);
+  return { base, bank, wallet, rows };
+}
+
+/** 日付の順。同じ日は入金を先に */
+const byDate = (a: AccountEntry, b: AccountEntry) => a.date.localeCompare(b.date) || (a.direction === b.direction ? 0 : a.direction === "in" ? -1 : 1);
+
+// ---------- クレカの請求（§3.3・§5.3） ----------
+
+export const billRef = (card: string, payDate: string) => `bill:${card}:${payDate}`;
+
+export interface Bill {
+  card: CardDef;
+  date: string; // 引落日
+  closingYm: string; // どの締め月の分か
+  items: CardEntry[]; // 請求に入るクレカ明細（予定を含む。分割（購入）を除く）
+  estimate: number; // 見込み
+  row: AccountEntry | null; // 口座明細のクレカ支払いの行
+  amount: number; // 確定していれば確定の額、なければ見込み
+}
+
+/** 引落月 payYm の、カードごとの請求 */
+export function billsFor(d: Data, payYm: string): Bill[] {
   const s = d.settings;
-  const soon = today > base.date ? today : addDays(base.date, 1);
-  const events: AssetEvent[] = [];
-  for (const e of d.entries) {
-    if (!isLive(e)) continue;
-    let cd = cashDate(e, s);
-    if (!cd) continue;
-    // 残高の報告日までに資産が動くはずだった分は、起きていれば報告した残高に入っている。二重に数えない
-    // （予定のまま残っていても、画面には「日付が過ぎた予定」として出るので、本人が確定か削除をする）
-    // 報告と同じ日のものは、報告のあとに入れたものだけ数える（残高を直したあとで ATM や口座払いを入れたとき）
-    if (!afterBase(cd, e, base)) continue;
-    // 報告日より後で、まだ起きていない予定は、遅れていても今日以降に起きるものとして数える
-    if (e.status === "plan" && cd < soon) cd = soon;
-    const label = e.item || e.shop || e.category || (e.kind === "income" ? "入金" : "支出");
-    events.push({ date: cd, delta: e.kind === "income" ? e.amount : -e.amount, label: e.kind === "transfer" ? "ATMで引き出し" : label, entry: e });
-  }
-  // カード請求額が分かっている引落日は、明細の合計の代わりに請求額で数える
-  for (const b of d.cardBills) {
-    if (b.pay_date <= base.date) continue;
-    let cardSum = 0;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const ev = events[i];
-      if (ev.date === b.pay_date && ev.entry?.method === "card" && ev.entry.kind === "expense" && cardOf(s, ev.entry.card).id === cardOf(s, b.card).id) { cardSum -= ev.delta; events.splice(i, 1); }
-    }
-    events.push({ date: b.pay_date, delta: -b.amount, label: `${cardOf(s, b.card).name}の引落（請求額）`, bill: true, card: cardOf(s, b.card).id, cardSum });
-  }
-  const isCard = (e: AssetEvent) => (e.entry?.method === "card" ? 1 : 0);
-  events.sort((a, b) => a.date.localeCompare(b.date) || Math.sign(b.delta) - Math.sign(a.delta) || isCard(a) - isCard(b));
-  return { base, events };
+  return s.cards.map((c) => {
+    const closingYm = closingFor(payYm, s, c.id);
+    const date = cardPayDate(closingYm, s, c.id);
+    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && cardOf(s, e.card).id === c.id && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
+    const estimate = items.reduce((a, e) => a + e.amount, 0);
+    const row = d.accounts.find((e) => e.source_ref === billRef(c.id, date)) ?? null;
+    const amount = row && (row.status === "confirmed" || row.locked) ? row.amount : estimate;
+    return { card: c, date, closingYm, items, estimate, row, amount };
+  });
 }
 
-/** 日付 t の終わりの予測資産 */
-export function assetAt(p: Projection, t: string): number {
-  let v = balanceTotal(p.base);
-  for (const ev of p.events) {
-    if (ev.date > t) break;
-    v += ev.delta;
-  }
-  return v;
-}
+export const billName = (b: { card: CardDef; closingYm: string }) => `${b.card.name} ${+b.closingYm.slice(5)}月分`;
 
-/** from〜to の間で、日の終わりの予測資産がいちばん少ない日 */
-export function minAsset(p: Projection, from: string, to: string): { value: number; date: string } {
-  let v = assetAt(p, from);
-  let best = { value: v, date: from };
-  const evs = p.events;
-  for (let i = 0; i < evs.length; i++) {
-    const ev = evs[i];
-    if (ev.date <= from) continue;
-    if (ev.date > to) break;
-    v += ev.delta;
-    // 同じ日の出来事をすべて足したあとの値で比べる
-    if (evs[i + 1]?.date === ev.date) continue;
-    if (v < best.value) best = { value: v, date: ev.date };
-  }
-  return best;
-}
-
-export interface MonthForecast {
-  ym: string;
-  from: string; // 判定する期間の始め＝この月にクレカで使った分の引落日 H
-  payDate: string; // H
-  to: string; // 判定する期間の終わり＝次の月の引落日
-  R: number; // この月まだ使える額
-  min: { value: number; date: string }; // 期間中のいちばん少ない資産（それより前の月の R を使ったあと）
-  spendDate: string; // この月の R が資産から出ると考える日（＝H）
+/** 請求の行を口座明細の形にする（まだ保存していないとき） */
+function billEntry(b: Bill, today: string): Omit<AccountEntry, "id"> {
+  return {
+    account: "bank", direction: "out", status: b.date <= today ? "confirmed" : "plan", group: "card", category: null, name: billName(b), memo: "",
+    date: b.date, amount: b.estimate, source: "card_bill", source_ref: billRef(b.card.id, b.date), recurring_id: null, goal_id: null,
+    card: b.card.id, pair_id: null, locked: false,
+  };
 }
 
 /**
- * 今月から n か月先までの R（§5.2, §5.5）。
- * 残りをカードで使うと考え、その引落日 H〜次の月の引落日 の間、資産が安全残高を下回らない額。
- * 前の月の R はそれぞれの H に出ていくものとして引く。
- * すでに使った分（カードも現金も）は A(t) に入っているので、使った分だけ R が減る。
+ * 口座明細のクレカ支払いの行を、クレカ明細に合わせる。
+ * - なければ作る（見込みが0なら作らない）
+ * - 予定のあいだ（本人が直していなければ）は、額を見込みに合わせる
+ * - 引落日が来たら確定にする（確定の額がまだなら見込みで）
  */
-export function forecast(d: Data, today: string, n = 3): MonthForecast[] | null {
-  const p = projection(d, today);
-  if (!p) return null;
-  const out: MonthForecast[] = [];
-  const cur = ymOf(today);
-  for (let k = 0; k <= n; k++) {
-    const ym = addMonths(cur, k);
-    const from = cardPayDate(ym, d.settings);
-    const to = cardPayDate(addMonths(ym, 1), d.settings);
-    // 前の月の R は、その月の H に出ていく。期間の始めにはどれも出ている
-    const spent = out.reduce((a, f) => a + Math.max(0, f.R), 0);
-    const m = minAsset(p, from, to);
-    const min = { value: m.value - spent, date: m.date };
-    out.push({ ym, from, payDate: from, to, R: min.value - d.settings.safety, min, spendDate: from });
+export function syncBills(d: Data, today: string, payMonths: string[]) {
+  const inserts: Omit<AccountEntry, "id">[] = [];
+  const updates: { id: string; patch: Partial<AccountEntry> }[] = [];
+  for (const ym of payMonths) {
+    for (const b of billsFor(d, ym)) {
+      if (!b.row) { if (b.estimate > 0) inserts.push(billEntry(b, today)); continue; }
+      if (b.row.status === "confirmed") continue;
+      const patch: Partial<AccountEntry> = {};
+      if (!b.row.locked && b.row.amount !== b.estimate) patch.amount = b.estimate;
+      if (b.date <= today) patch.status = "confirmed";
+      if (Object.keys(patch).length) updates.push({ id: b.row.id, patch });
+    }
+  }
+  return { inserts, updates };
+}
+
+/** 保存していない請求の行も足した口座明細（計算用。来月の請求はまだ行がないことがある） */
+export function accountsWithBills(d: Data, today: string, payMonths: string[]): AccountEntry[] {
+  const extra = payMonths.flatMap((ym) => billsFor(d, ym)).filter((b) => !b.row && b.estimate > 0).map((b) => ({ id: `virtual:${b.card.id}:${b.date}`, ...billEntry(b, today) }));
+  return [...d.accounts, ...extra];
+}
+
+// ---------- 目標（§3.4） ----------
+
+export interface GoalMonth { ym: string; pay: number; lump: number; left: number }
+
+/** 返済の目標の、その月の支払い日（カードなら引落日、口座なら goal.day） */
+export function goalPayDate(g: Goal, ym: string, s: Settings): string {
+  return g.card ? cardPayDate(closingFor(ym, s, g.card), s, g.card) : shiftBusiness(dayOf(ym, g.day || 27), "next");
+}
+
+/**
+ * 目標の月ごとの額。返済は残高が0になるまで、積立は目標額に届くまで（終わる月があればそこまで）。
+ * left は、返済ならその月の支払いのあとの残高、積立ならその月までにたまった額
+ */
+export function goalSchedule(g: Goal, s: Settings, fromYm: string, n: number): GoalMonth[] {
+  const out: GoalMonth[] = [];
+  const start = g.start_month ?? fromYm;
+  if (g.kind === "repay") {
+    let left = g.balance;
+    // 残高の日より後の支払いから数える
+    let ym = g.as_of && ymOf(g.as_of) > start ? ymOf(g.as_of) : start;
+    if (g.as_of && goalPayDate(g, ym, s) <= g.as_of) ym = addMonths(ym, 1);
+    for (let k = 0; k < 240; k++, ym = addMonths(ym, 1)) {
+      const lump = g.lumps.filter((l) => ymOf(l.date) === ym && (!g.as_of || l.date > g.as_of)).reduce((a, l) => a + l.amount, 0);
+      const stop = g.end_month && ym > g.end_month;
+      const pay = left > 0 && !stop ? Math.min(g.monthly, left) : 0;
+      const l2 = Math.min(lump, Math.max(0, left - pay));
+      left -= pay + l2;
+      if (ym >= fromYm) out.push({ ym, pay, lump: l2, left });
+      if (out.length >= n) break;
+    }
+    return out;
+  }
+  let saved = g.balance || 0;
+  for (let k = 0, ym = start < fromYm ? start : fromYm; out.length < n && k < 240; k++, ym = addMonths(ym, 1)) {
+    const active = ym >= start && (!g.end_month || ym <= g.end_month) && (!g.target || saved < g.target);
+    const pay = active ? (g.target ? Math.min(g.monthly, g.target - saved) : g.monthly) : 0;
+    const lump = active ? g.lumps.filter((l) => ymOf(l.date) === ym).reduce((a, l) => a + l.amount, 0) : 0;
+    saved += pay + lump;
+    if (ym >= fromYm) out.push({ ym, pay, lump, left: saved });
   }
   return out;
 }
 
-/** 現金・PayPay で今日使えば、その日から出ていく。今日〜次の月の引落日 で判定した上限 */
-export function cashLimit(d: Data, today: string): { value: number; date: string } | null {
-  const p = projection(d, today);
-  if (!p) return null;
-  const to = cardPayDate(addMonths(ymOf(today), 1), d.settings);
-  const m = minAsset(p, today, to);
-  return { value: m.value - d.settings.safety, date: m.date };
+/** その月の目標用マイナスの自動の値 ＝ 動いている目標の毎月の額 ＋ 臨時の額 */
+export function goalMinusAuto(d: Data, ym: string): number {
+  return d.goals.filter((g) => g.active).reduce((a, g) => {
+    const m = goalSchedule(g, d.settings, ym, 1)[0];
+    return a + (m ? m.pay + m.lump : 0);
+  }, 0);
 }
 
-/** 今月分の引落日より前に、使う額にかかわらず安全残高を下回る日 */
-export function dipBefore(d: Data, today: string): { value: number; date: string } | null {
-  const p = projection(d, today);
-  if (!p) return null;
-  const m = minAsset(p, today, addDays(cardPayDate(ymOf(today), d.settings), -1));
-  return m.value < d.settings.safety ? m : null;
+export const goalRef = (g: Goal, ym: string) => `goal:${g.id}:${ym}`;
+export const lumpRef = (g: Goal, date: string) => `goal:${g.id}:lump:${date}`;
+
+/**
+ * 返済の目標から、まだ作っていない返済の予定を作る（§3.4）。
+ * カードがあればクレカ明細（分割（返済））、なければ口座明細の出金。臨時の返済は口座明細の出金。
+ * 同じカードの同じ締め月に分割（返済）の明細がもうあれば（定期のお金や前の版から来たもの）、作らない
+ */
+export function missingGoalPlans(d: Data, months: string[]) {
+  const s = d.settings;
+  const have = new Set([...d.accounts, ...d.cards].map((e) => e.source_ref).filter(Boolean));
+  const accounts: Omit<AccountEntry, "id">[] = [];
+  const cards: Omit<CardEntry, "id">[] = [];
+  for (const g of d.goals) {
+    if (!g.active || g.kind !== "repay") continue;
+    for (const m of goalSchedule(g, s, months[0], months.length)) {
+      if (!months.includes(m.ym)) continue;
+      if (m.pay > 0 && !have.has(goalRef(g, m.ym))) {
+        if (g.card) {
+          const c = cardOf(s, g.card).id;
+          const cym = closingFor(m.ym, s, c);
+          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && closingMonth(e.date, s, c) === cym && (!e.goal_id || e.goal_id === g.id));
+          if (!dup) cards.push({ card: c, status: "plan", date: closingEnd(cym, s, c), amount: m.pay, group: "installment", category: null, name: `${g.name}の返済`, shop: "", memo: "", tatekae: 0, source: "goal", source_ref: goalRef(g, m.ym), merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: g.id });
+        } else {
+          accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}の返済`, memo: "", date: goalPayDate(g, m.ym, s), amount: m.pay, source: "goal", source_ref: goalRef(g, m.ym), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
+        }
+      }
+    }
+    // 臨時の返済は、残っている額までにする（「賞与から全額」など）
+    const sched = goalSchedule(g, s, months[0], months.length);
+    for (const m of sched) {
+      let room = m.lump;
+      for (const l of g.lumps.filter((x) => ymOf(x.date) === m.ym && (!g.as_of || x.date > g.as_of)).sort((a, b) => a.date.localeCompare(b.date))) {
+        const amount = Math.min(l.amount, room);
+        room -= amount;
+        if (amount <= 0 || have.has(lumpRef(g, l.date))) continue;
+        accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}（${l.memo || "臨時の返済"}）`, memo: "", date: l.date, amount, source: "goal", source_ref: lumpRef(g, l.date), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
+      }
+    }
+  }
+  return { accounts, cards };
 }
+
+export interface GoalOutlook { goal: Goal; months: GoalMonth[]; doneYm: string | null }
+
+/** 目標の見通し（§5.7）。返済は残高が0になる月、積立は目標額に届く月 */
+export function goalOutlook(d: Data, fromYm: string, n = 36): GoalOutlook[] {
+  return d.goals.filter((g) => g.active).map((g) => {
+    const months = goalSchedule(g, d.settings, fromYm, n);
+    const hit = months.find((m) => (g.kind === "repay" ? m.left <= 0 : !!g.target && m.left >= g.target));
+    return { goal: g, months, doneYm: g.kind === "repay" && g.balance <= 0 ? fromYm : hit?.ym ?? null };
+  });
+}
+
+// ---------- 予算（§5.1・§5.2） ----------
 
 /** その月の費目予算。その月になければ、いちばん近い前の月の予算を引き継ぐ */
 export function budgetsFor(d: Data, ym: string): Map<string, number> {
-  // 「予算の元」（#給与 など）は月ごとの値なので、費目予算の引き継ぎには使わない
   const catRows = d.budgets.filter((b) => !b.category.startsWith("#"));
   const months = [...new Set(catRows.map((b) => b.month))].filter((m) => m <= ym).sort();
   const src = months.length ? months[months.length - 1] : null;
   const map = new Map<string, number>();
   if (src) for (const b of catRows) if (b.month === src) map.set(b.category, b.amount);
   map.delete(RESERVE); // 予備はその月に計算する
-  // 予算を入れていない固定費の費目は、定期のお金に入れたその月の額を初めの値にする。
-  // 定期のお金になければ、その月の明細と予定（1回だけの家賃の予定など）の合計にする
+  // 予算を入れていない固定費の費目は、その月の定期マスタの額、それもなければその月の固定費の明細の合計を初めの値にする
   for (const c of d.settings.fixCats) {
     if (map.has(c)) continue;
     const sum = d.recurring.filter((r) => r.active && r.kind === "expense" && r.category === c && (!r.start_month || r.start_month <= ym) && (!r.end_month || r.end_month >= ym)).reduce((a, r) => a + r.amount, 0)
-      || d.entries.filter((e) => isLive(e) && e.kind === "expense" && e.category === c && ymOf(e.date) === ym).reduce((a, e) => a + ownCost(e), 0);
+      || spendOf(d, ym).filter((x) => x.category === c).reduce((a, x) => a + x.own, 0);
     if (sum) map.set(c, sum);
   }
   return map;
 }
 
-/** 予算に入れる給与か。「給与」にしたもの、または定期のお金から作った収入で扱いを決めていないもの */
-export const isSalary = (e: Entry) => e.kind === "income" && (e.category === INCOME_SALARY || (!e.category && !!e.recurring_id));
-
 export interface MonthBase {
   salary: number; // 給与
-  extra: number; // 追加予算（イベチケなど、予算に足すと決めた入金）
-  fixed: number; // 固定費（大項目が固定費の費目の予算の合計）
-  goal: number; // 目標用マイナス（リボの返済の計画分・貯金）
-  T: number; // 今月の予算（自由に使えるお金）＝ 給与 ＋ 追加予算 − 固定費 − 目標用マイナス
-  auto: Record<BaseField, number>; // 明細と予定から出した値
-  manual: Record<BaseField, boolean>; // 本人が手で直したか（固定費は費目の予算で直すので、いつも false）
-  repay: number; // その月の返済（目標用マイナスの初期値に入る）
-  saving: number; // その月の貯金（目標用マイナスの初期値に入る）
+  extra: number; // 追加予算
+  fixed: number; // 固定費（固定費の費目の予算の合計）
+  goal: number; // 目標用マイナス
+  goalAuto: number; // 目標マスタから出した目標用マイナス
+  goalManual: boolean; // 予算マスタで手で直したか
+  T: number; // 今月の予算 ＝ 給与 ＋ 追加予算 − 固定費 − 目標用マイナス
 }
 
-/**
- * その月の「予算の元」（§5.1）。給与・追加予算・目標用マイナスは明細と予定から出し、本人が手で直した月はその値を使う。
- * 固定費は、大項目が固定費の費目の予算（見込み）の合計。
- * 立替の返金・賞与・売却代金などは、「追加予算」にしたときだけ入る。
- */
+/** その月の「予算の元」（§5.1） */
 export function monthBase(d: Data, ym: string): MonthBase {
-  let salary = 0, extra = 0, repay = 0;
-  for (const e of d.entries) {
-    if (!isLive(e) || ymOf(e.date) !== ym) continue;
-    if (e.kind === "income") {
-      if (isSalary(e)) salary += e.amount;
-      else if (e.category === INCOME_EXTRA) extra += e.amount;
-    } else if (e.kind === "expense" && e.category === REPAY) repay += e.amount;
+  let salary = 0, extra = 0;
+  for (const e of d.accounts) {
+    if (e.direction !== "in" || ymOf(e.date) !== ym) continue;
+    if (e.group === "salary") salary += e.amount;
+    else if (e.group === "extra") extra += e.amount;
   }
-  const s = d.settings;
   const budgets = budgetsFor(d, ym);
-  const fixed = s.fixCats.reduce((a, c) => a + (budgets.get(c) || 0), 0);
-  const saving = s.savingStart && ym >= s.savingStart ? s.savingMonthly || 0 : 0;
-  const auto: Record<BaseField, number> = { salary, extra, fixed, goal: repay + saving };
-  const manual: Record<BaseField, boolean> = { salary: false, extra: false, fixed: false, goal: false };
-  const val = { ...auto };
-  for (const k of Object.keys(BASE_KEYS) as BaseKey[]) {
-    const hit = d.budgets.find((b) => b.month === ym && b.category === BASE_KEYS[k]);
-    if (hit) { val[k] = hit.amount; manual[k] = true; }
+  const fixed = d.settings.fixCats.reduce((a, c) => a + (budgets.get(c) || 0), 0);
+  const goalAuto = goalMinusAuto(d, ym);
+  const hit = d.budgets.find((b) => b.month === ym && b.category === GOAL_KEY);
+  const goal = hit ? hit.amount : goalAuto;
+  return { salary, extra, fixed, goal, goalAuto, goalManual: !!hit, T: salary + extra - fixed - goal };
+}
+
+/** 予算に数える出費の1件（クレカ明細か口座明細） */
+export interface Spend {
+  kind: "card" | "account";
+  id: string;
+  date: string;
+  plan: boolean;
+  fixed: boolean;
+  category: string | null; // null は未分類
+  own: number; // 予算に数える額（立替を除く）
+  card?: CardEntry;
+  account?: AccountEntry;
+}
+
+/** その月の、予算に数える出費（クレカ明細の変動費・固定費、口座明細の出金の変動費・固定費） */
+export function spendOf(d: Data, ym: string): Spend[] {
+  const out: Spend[] = [];
+  for (const e of d.cards) {
+    if (!isLive(e) || ymOf(e.date) !== ym || (e.group !== "variable" && e.group !== "fixed")) continue;
+    out.push({ kind: "card", id: e.id, date: e.date, plan: e.status === "plan", fixed: e.group === "fixed", category: e.category, own: ownCost(e), card: e });
   }
-  return { ...val, T: val.salary + val.extra - val.fixed - val.goal, auto, manual, repay, saving };
+  for (const e of d.accounts) {
+    if (e.direction !== "out" || ymOf(e.date) !== ym || (e.group !== "variable" && e.group !== "fixed")) continue;
+    out.push({ kind: "account", id: e.id, date: e.date, plan: e.status === "plan", fixed: e.group === "fixed", category: e.category, own: e.amount, account: e });
+  }
+  return out;
 }
 
 export interface CatRow {
   cat: string;
-  fixed: boolean; // 大項目が固定費
+  fixed: boolean;
   budget: number;
   used: number;
   planned: number;
   rem: number;
   daily: number | null;
-  entries: Entry[]; // 実際の明細（速報・確定）
-  plans: Entry[];
-  unclassified: number; // 未分類から予備に数えている額
+  items: Spend[]; // 実際の出費
+  plans: Spend[];
+  unclassified: number;
 }
 
 export interface MonthView {
   ym: string;
   when: "past" | "current" | "future";
-  daysLeft: number; // 今日を含む月末までの日数（過ぎた月は 0）
+  daysLeft: number;
   base: MonthBase;
-  T: number; // 今月の予算（自由に使えるお金）
+  T: number;
   U: number; // 変動費で使った
-  P: number; // 変動費のこれから使う予定
-  fixedOver: number; // 固定費が予算（見込み）をこえた分
-  R: number; // 自由に使える残り ＝ T − U − P − fixedOver
+  P: number; // 変動費の予定
+  fixedOver: number; // 固定費が見込みをこえた分
+  R: number; // 残り予算 ＝ T − U − P − fixedOver
   cats: CatRow[];
   reserveBudget: number;
   overAllocated: boolean;
-  unclassified: Entry[];
-  outside: Entry[]; // 予算に入れない支出（返済・予算外・リボで買った物）
-  incomes: Entry[];
+  unclassified: Spend[];
+  outsideCards: CardEntry[]; // 予算に入れないクレカ明細（立替・分割）
+  outsideAccounts: AccountEntry[]; // 予算に入れない口座明細の出金（立替・クレカ支払い・その他）
+  incomes: AccountEntry[];
 }
 
 export function computeMonth(d: Data, ym: string, today: string): MonthView {
@@ -256,351 +325,149 @@ export function computeMonth(d: Data, ym: string, today: string): MonthView {
   const cats = budgetCats(s);
   const rows = new Map<string, CatRow>();
   const budgets = budgetsFor(d, ym);
-  for (const c of cats) rows.set(c, { cat: c, fixed: isFixedCat(s, c), budget: budgets.get(c) || 0, used: 0, planned: 0, rem: 0, daily: null, entries: [], plans: [], unclassified: 0 });
-
-  const unclassified: Entry[] = [], outside: Entry[] = [], incomes: Entry[] = [];
+  for (const c of cats) rows.set(c, { cat: c, fixed: isFixedCat(s, c), budget: budgets.get(c) || 0, used: 0, planned: 0, rem: 0, daily: null, items: [], plans: [], unclassified: 0 });
+  const unclassified: Spend[] = [];
   let U = 0, P = 0;
-  for (const e of d.entries) {
-    if (!isLive(e) || ymOf(e.date) !== ym) continue;
-    if (e.kind === "income") { incomes.push(e); continue; }
-    if (e.kind !== "expense") continue;
-    const c = budgetCat(e, s);
-    if (!c) { outside.push(e); continue; }
+  for (const x of spendOf(d, ym)) {
+    // 費目の一覧にない費目と未分類は、変動費なら予備、固定費ならそのまま固定費の行を作らずに予備で数える
+    const c = x.category && rows.has(x.category) ? x.category : RESERVE;
     const row = rows.get(c)!;
-    if (!e.category && e.status !== "plan") { unclassified.push(e); row.unclassified += ownCost(e); }
-    if (e.status === "plan") { row.planned += ownCost(e); row.plans.push(e); if (!row.fixed) P += ownCost(e); }
-    else { row.used += ownCost(e); row.entries.push(e); if (!row.fixed) U += ownCost(e); }
+    if (!x.category) { unclassified.push(x); row.unclassified += x.own; }
+    if (x.plan) { row.planned += x.own; row.plans.push(x); if (!row.fixed) P += x.own; }
+    else { row.used += x.own; row.items.push(x); if (!row.fixed) U += x.own; }
   }
-
   const base = monthBase(d, ym);
   const T = base.T;
-  // 固定費は予算（見込み）を給与から引いてあるので、こえた分だけを自由に使えるお金から引く
   const fixedOver = [...rows.values()].filter((r) => r.fixed).reduce((a, r) => a + Math.max(0, r.used + r.planned - r.budget), 0);
   const others = cats.filter((c) => c !== RESERVE && !isFixedCat(s, c)).reduce((a, c) => a + rows.get(c)!.budget, 0);
   const reserveRow = rows.get(RESERVE)!;
   reserveRow.budget = T - others;
-  const reserveBudget = reserveRow.budget;
-
   for (const r of rows.values()) {
     r.rem = r.budget - r.used - r.planned;
     r.daily = s.dailyCats.includes(r.cat) && when !== "past" ? (r.rem > 0 && daysLeft > 0 ? Math.floor(r.rem / daysLeft) : 0) : null;
-    r.entries.sort((a, b) => b.date.localeCompare(a.date));
+    r.items.sort((a, b) => b.date.localeCompare(a.date));
     r.plans.sort((a, b) => a.date.localeCompare(b.date));
   }
+  const inMonth = (e: { date: string }) => ymOf(e.date) === ym;
   return {
-    ym, when, daysLeft, base, T, U, P, fixedOver, R: T - U - P - fixedOver, cats: cats.map((c) => rows.get(c)!), reserveBudget,
-    overAllocated: reserveBudget < 0, unclassified, outside, incomes,
+    ym, when, daysLeft, base, T, U, P, fixedOver, R: T - U - P - fixedOver, cats: cats.map((c) => rows.get(c)!),
+    reserveBudget: reserveRow.budget, overAllocated: reserveRow.budget < 0, unclassified,
+    outsideCards: d.cards.filter((e) => isLive(e) && inMonth(e) && e.group !== "variable" && e.group !== "fixed").sort((a, b) => b.date.localeCompare(a.date)),
+    outsideAccounts: d.accounts.filter((e) => e.direction === "out" && inMonth(e) && e.group !== "variable" && e.group !== "fixed").sort((a, b) => b.date.localeCompare(a.date)),
+    incomes: d.accounts.filter((e) => e.direction === "in" && inMonth(e)).sort((a, b) => a.date.localeCompare(b.date)),
   };
 }
 
-export interface GoalRow {
-  ym: string;
-  goal: number; // その月の目標用マイナス
-  bonus: number; // その月の賞与（予算に入れない収入のうち「賞与」）。返済・貯金に回す
-  toDebt: number; // そのうち借金の返済に回る分
-  toSaving: number; // そのうち貯金に回る分
-  debtLeft: number; // その月の終わりの借金の残り（見込み）
-  saved: number; // その月の終わりまでにたまる貯金（見込み）
-}
+// ---------- 口座の今後の動き（§5.5） ----------
 
-/** 見通しで返済・貯金に回す賞与か（予算に入れない収入のうち、内容に「賞与」とあるもの） */
-export const isBonus = (e: Entry) => e.kind === "income" && !isSalary(e) && e.category !== INCOME_EXTRA && /賞与|ボーナス/.test(e.item);
-
-/**
- * 目標用マイナスの見通し。毎月の目標用マイナスと賞与を、まず借金（リボ・分割。予定のものも含む）の返済に回し、
- * 借金がなくなったら貯金に回すと考える。利息・手数料は入れていない。
- */
-export function goalPlan(d: Data, fromYm: string, n = 12): { rows: GoalRow[]; payoffYm: string | null; reachYm: string | null } {
-  let debt = d.debts.reduce((a, x) => a + (x.balance || 0), 0);
-  let saved = 0;
-  const rows: GoalRow[] = [];
-  let payoffYm: string | null = debt <= 0 ? fromYm : null, reachYm: string | null = null;
-  for (let k = 0; k < n; k++) {
-    const ym = addMonths(fromYm, k);
-    const goal = Math.max(0, monthBase(d, ym).goal);
-    const bonus = d.entries.filter((e) => isLive(e) && isBonus(e) && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0);
-    const toDebt = Math.min(goal + bonus, debt);
-    debt -= toDebt;
-    saved += goal + bonus - toDebt;
-    rows.push({ ym, goal, bonus, toDebt, toSaving: goal + bonus - toDebt, debtLeft: debt, saved });
-    if (!payoffYm && debt <= 0) payoffYm = ym;
-    if (!reachYm && d.settings.reserveGoal > 0 && saved >= d.settings.reserveGoal) reachYm = ym;
-  }
-  return { rows, payoffYm, reachYm };
-}
-
-
-export interface PaydayCheck {
-  date: string; // 給料日の前日
-  value: number;
-}
-
-/** 目標③：給料日前日の予測資産（それまでの月の R をすべて使ったとして） */
-export function paydayChecks(d: Data, today: string, n = 3): PaydayCheck[] {
-  const p = projection(d, today);
-  const fc = forecast(d, today, n);
-  if (!p || !fc) return [];
-  const out: PaydayCheck[] = [];
-  const paydays = d.entries.filter((e) => isLive(e) && e.kind === "income" && e.recurring_id && e.date > today && /給与/.test(e.item)).map((e) => e.date).sort();
-  for (const pd of [...new Set(paydays)].slice(0, n)) {
-    const day = addDays(pd, -1);
-    const spent = fc.filter((f) => f.spendDate <= day).reduce((a, f) => a + Math.max(0, f.R), 0);
-    out.push({ date: day, value: assetAt(p, day) - spent });
-  }
-  return out;
-}
-
-/** 通帳の形：報告日から先の出来事と残高。同じ日のクレカ引落は1行にまとめる */
-export function passbook(d: Data, today: string, to: string): { base: Balance; rows: (AssetEvent & { balance: number; count: number })[] } | null {
-  const p = projection(d, today);
-  if (!p) return null;
-  const grouped: (AssetEvent & { count: number })[] = [];
-  for (const ev of p.events) {
-    if (ev.date > to) break;
-    const card = ev.entry?.method === "card" && ev.entry.kind === "expense";
-    const last = grouped[grouped.length - 1];
-    if (card && last && last.date === ev.date && last.label === "クレカ引落") { last.delta += ev.delta; last.count++; continue; }
-    grouped.push(card ? { date: ev.date, delta: ev.delta, label: "クレカ引落", count: 1 } : { ...ev, count: 1 });
-  }
-  let v = balanceTotal(p.base);
-  const rows = grouped.map((ev) => { v += ev.delta; return { ...ev, balance: v }; });
-  return { base: p.base, rows };
-}
-
-export const daysAgo = (d: string, today: string) => daysBetween(d, today);
-
-// ---------- 計画をつくる（リボを返し終えて、給料日前日に目標の額を残す） ----------
-
-export interface PlanInput {
-  from: string; // 計画を始める月
-  monthly: number; // 毎月回す額（目標用マイナス）
-  useBonus: boolean; // 賞与を返済・貯金に回すか
-  saved: number; // 今の貯金
-  target: number; // 残したい額（給料日前日の残高の目標）
-  months?: number; // 計算する月数（初めは36か月）
-}
-
-export interface PlanRow {
-  ym: string;
-  put: number; // その月の目標用マイナス（毎月の額。返済の予定のほうが多い月はその額）
-  bonus: number; // その月に回す賞与
-  toDebt: number;
-  toSaving: number;
-  debtLeft: number;
-  saved: number;
-  free: number; // その月の自由に使えるお金（給与 ＋ 追加予算 − 固定費 − 目標用マイナス）
-}
-
-export interface PlanResult {
-  rows: PlanRow[];
-  payoffYm: string | null; // リボ・分割が0になる月
-  reachYm: string | null; // 貯金が目標に届く月
-  minFree: number; // 計画の間で、自由に使えるお金がいちばん少ない月の額
-}
-
-/**
- * 計画の見通し。毎月「毎月回す額」を目標用マイナスにし、まずリボ・分割（予定のものも含む）の返済に回す。
- * リボの返済の予定がその額より多い月は、返済の予定の額にする（最低限払う分）。返し終えたら貯金に回す。
- * 賞与は、その月にそのまま返済・貯金に回す。利息・手数料は入れない。
- */
-export function planGoals(d: Data, p: PlanInput): PlanResult {
-  const n = p.months ?? 36;
-  let debt = d.debts.reduce((a, x) => a + (x.balance || 0), 0);
-  let saved = p.saved;
-  const rows: PlanRow[] = [];
-  let payoffYm: string | null = debt <= 0 ? p.from : null, reachYm: string | null = saved >= p.target && p.target > 0 ? p.from : null;
-  let minFree = Infinity;
-  for (let k = 0; k < n; k++) {
-    const ym = addMonths(p.from, k);
-    const b = monthBase(d, ym);
-    const put = debt > 0 ? Math.max(p.monthly, b.repay) : p.monthly;
-    const bonus = p.useBonus ? d.entries.filter((e) => isLive(e) && isBonus(e) && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0) : 0;
-    const toDebt = Math.min(put + bonus, debt);
-    debt -= toDebt;
-    saved += put + bonus - toDebt;
-    // 給与の予定がまだない先の月は、設定の給与の見込み額で数える
-    const salary = b.salary || d.settings.salaryEstimate || 0;
-    const free = salary + b.extra - b.fixed - put;
-    minFree = Math.min(minFree, free);
-    rows.push({ ym, put, bonus, toDebt, toSaving: put + bonus - toDebt, debtLeft: debt, saved, free });
-    if (!payoffYm && debt <= 0) payoffYm = ym;
-    if (!reachYm && p.target > 0 && debt <= 0 && saved >= p.target) reachYm = ym;
-  }
-  return { rows, payoffYm, reachYm, minFree: minFree === Infinity ? 0 : minFree };
-}
-
-/** 「◯年◯月までに達成したい」：その月までに貯金が目標に届く、いちばん少ない毎月の額（1,000円単位）。届かなければ null */
-export function monthlyFor(d: Data, p: Omit<PlanInput, "monthly">, by: string, max = 1_000_000): number | null {
-  const ok = (m: number) => { const r = planGoals(d, { ...p, monthly: m }); return !!r.reachYm && r.reachYm <= by; };
-  if (!ok(max)) return null;
-  let lo = 0, hi = max;
-  while (hi - lo > 1000) { const mid = Math.floor((lo + hi) / 2000) * 1000; if (ok(mid)) hi = mid; else lo = mid; }
-  return ok(lo) ? lo : hi;
-}
-
-export interface CardDebit {
-  card: CardDef;
-  date: string; // 引落日
-  closingYm: string; // どの締め月の分か
-  items: Entry[]; // その締め月にこのカードで使ったもの（返済を除く）
-  repays: Entry[]; // この引落日に一緒に引き落とされるリボ・分割の返済
-  estimate: number; // 見込み ＝ 使ったもの ＋ 返済
-  bill: number | null; // 確定した請求額（カードのメール・手入力）
-  amount: number; // 確定していれば請求額、なければ見込み
-}
-
-export interface Debits {
-  direct: Entry[]; // 口座から直接引き落とされるもの（奨学金・共済など）
-  directSum: number;
-  cards: CardDebit[];
-  total: number;
-}
-
-/**
- * その月に口座から出ていく引き落とし（§5.7）。
- * - 口座から直接：金種が「口座」の支出（予定を含む）
- * - カード：引落日がその月になる締め月の、カードごとの利用と返済。請求額が分かっていればそれを使う
- */
-export function debitsFor(d: Data, ym: string): Debits {
-  const s = d.settings;
-  const live = d.entries.filter((e) => isLive(e) && e.kind === "expense");
-  const direct = live.filter((e) => e.method === "bank" && ymOf(e.date) === ym).sort((a, b) => a.date.localeCompare(b.date));
-  const cards = s.cards.map((c): CardDebit => {
-    const closingYm = addMonths(ym, -c.payMonths);
-    const date = cardPayDate(closingYm, s, c.id);
-    const mine = live.filter((e) => e.method === "card" && cardOf(s, e.card).id === c.id);
-    const items = mine.filter((e) => e.category !== REPAY && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
-    const repays = mine.filter((e) => e.category === REPAY && ymOf(e.date) === ym);
-    const estimate = [...items, ...repays].reduce((a, e) => a + e.amount, 0);
-    const hit = d.cardBills.find((b) => cardOf(s, b.card).id === c.id && b.pay_date === date);
-    const bill = hit ? hit.amount : null;
-    return { card: c, date, closingYm, items, repays, estimate, bill, amount: bill ?? estimate };
-  });
-  const directSum = direct.reduce((a, e) => a + e.amount, 0);
-  return { direct, directSum, cards, total: directSum + cards.reduce((a, c) => a + c.amount, 0) };
-}
-
-export interface DebitLine { key: string; date: string; label: string; amount: number; state: "予定" | "見込み" | "確定"; card?: CardDebit }
-
-/** 引き落としを1行ずつにする。カードは「使った分」とリボ・分割の返済を分ける。請求額が確定したら、使った分 ＝ 請求額 − 返済 */
-export function debitLines(x: Debits): DebitLine[] {
-  const title = (e: Entry) => e.item || e.shop || "支出";
-  const out: DebitLine[] = x.direct.map((e) => ({ key: e.id, date: e.date, label: title(e), amount: e.amount, state: e.status === "plan" ? "予定" : "確定" }));
-  for (const c of x.cards) {
-    const repay = c.repays.reduce((a, e) => a + e.amount, 0);
-    const used = c.bill != null ? Math.max(0, c.bill - repay) : c.items.reduce((a, e) => a + e.amount, 0);
-    out.push({ key: c.card.id, date: c.date, label: `${c.card.name}（${+c.closingYm.slice(5)}月分）`, amount: used, state: c.bill != null ? "確定" : "見込み", card: c });
-    for (const e of c.repays) out.push({ key: e.id, date: c.date, label: title(e), amount: e.amount, state: c.bill != null || e.status !== "plan" ? "確定" : "予定" });
-  }
-  return out.sort((a, b) => a.date.localeCompare(b.date));
-}
-
-export interface NextDebits {
-  ym: string;
-  cardFixed: number; // 固定費：カードで払う分（今月使う家賃など。来月引き落とし）
-  directFixed: number; // 固定費：口座から直接（奨学金など）
-  cardVar: number; // 変動費：カードで払う分（今月の使った＋予定。来月引き落とし）
-  repay: number; // リボ・分割の返済
-  other: number; // そのほか（予算外など）
-  total: number; // ＝ その月の引き落としの合計（§5.7）
-}
-
-/**
- * 来月の支払い予定（§5.8）：来月に口座から出る引き落としを、固定費／変動費／返済に分けたもの。
- * カードの分は今月の利用（予定を含む）。請求額が確定していれば、使った分を請求額に合わせて変動費で調整する。
- */
-export function nextMonthDebits(d: Data, ym: string): NextDebits {
-  const s = d.settings;
-  const x = debitsFor(d, ym);
-  const kindOf = (e: Entry) => (e.category === REPAY ? "repay" : e.category && isFixedCat(s, e.category) ? "fixed" : !e.category || s.varCats.includes(e.category) ? "var" : "other");
-  const r = { ym, cardFixed: 0, directFixed: 0, cardVar: 0, repay: 0, other: 0, total: x.total };
-  for (const e of x.direct) {
-    const k = kindOf(e);
-    if (k === "fixed") r.directFixed += e.amount; else if (k === "repay") r.repay += e.amount; else r.other += e.amount;
-  }
-  for (const c of x.cards) {
-    let used = 0;
-    for (const e of c.items) {
-      const k = kindOf(e);
-      if (k === "fixed") r.cardFixed += e.amount; else if (k === "var") r.cardVar += e.amount; else r.other += e.amount;
-      used += e.amount;
-    }
-    r.repay += c.repays.reduce((a, e) => a + e.amount, 0);
-    if (c.bill != null) r.cardVar += c.amount - c.estimate; // 請求額との差
-  }
-  return r;
-}
-
-/** 今日より後で、いちばん近い給料日（給料日が土日祝なら後の平日） */
+/** 今日より後で、いちばん近い給料日（土日祝なら後の平日） */
 export function nextPayday(s: Settings, today: string): string {
   const ym = ymOf(today);
   const p = shiftBusiness(dayOf(ym, s.payday), "next");
   return p > today ? p : shiftBusiness(dayOf(addMonths(ym, 1), s.payday), "next");
 }
 
-export interface FlowRow { date: string; label: string; delta: number; balance: number; state: "予定" | "見込み" | "確定" }
-
-/** 口座の出来事を表の行にする。同じ日の同じカードの明細は「〇〇のクレカの請求」1行にまとめる */
-function flowRows(d: Data, events: AssetEvent[], start: number): FlowRow[] {
-  const s = d.settings;
-  const rows: Omit<FlowRow, "balance">[] = [];
-  const cardRow = new Map<string, Omit<FlowRow, "balance">>();
-  for (const ev of events) {
-    const e = ev.entry;
-    if (e && e.method === "card" && e.kind === "expense") {
-      const c = cardOf(s, e.card);
-      const key = `${ev.date}:${c.id}`;
-      const hit = cardRow.get(key);
-      if (hit) { hit.delta += ev.delta; continue; }
-      const closing = e.category === REPAY ? addMonths(ymOf(ev.date), -c.payMonths) : closingMonth(e.date, s, c.id);
-      const row = { date: ev.date, label: `${c.name}のクレカの請求（${+closing.slice(5)}月分）`, delta: ev.delta, state: "見込み" as const };
-      cardRow.set(key, row); rows.push(row);
-      continue;
-    }
-    if (ev.bill) {
-      const c = cardOf(s, ev.card);
-      rows.push({ date: ev.date, label: `${c.name}のクレカの請求（${+addMonths(ymOf(ev.date), -c.payMonths).slice(5)}月分）`, delta: ev.delta, state: "確定" });
-      continue;
-    }
-    rows.push({ date: ev.date, label: e?.kind === "income" ? `${ev.label}（入金）` : ev.label, delta: ev.delta, state: e?.status === "plan" ? "予定" : "確定" });
-  }
-  let v = start;
-  return rows.map((r) => ({ ...r, balance: (v += r.delta) }));
-}
+export interface FlowRow { date: string; entry: AccountEntry; delta: number; balance: number; overdue?: boolean }
 
 /**
- * いまの口座と財布（§5.9）。最後に入れた残高に、そのあと今日までに起きたこと（予定のままのものは除く）を足し引きする。
- * 口座：入金・口座払い・PayPayチャージ・ATMで引き出し・引落日が来たカードの請求。財布：現金で使った・受け取った・ATMで引き出した
+ * いまの口座残高から、明日〜 to の前日（指定がなければ次の給料日の前日）の口座明細（口座）を日付の順に並べる。
+ * 予定のまま計上日を過ぎたものは今日に数える。保存していないクレカ支払いの行も入れる
  */
-export function accountNow(d: Data, today: string) {
-  const p = projection(d, today);
-  if (!p) return null;
-  const base = p.base;
-  const done = p.events.filter((ev) => ev.date <= today && ev.entry?.status !== "plan");
-  const rows = flowRows(d, done, base.bank || 0);
-  const bank = rows.length ? rows[rows.length - 1].balance : base.bank || 0;
-  const cash = d.entries.filter((e) => isLive(e) && e.status !== "plan" && afterBase(e.date, e, base) && e.date <= today).reduce((a, e) => a + walletDelta(e), base.cash || 0);
-  return { base, rows, bank, cash };
-}
-
-/**
- * 口座の今後の動き（§5.9）。いまの口座残高から、明日〜次の給料日の前日（今月中は月末まで）の入金と引き落としを日付の順に並べる。
- * - カードは引落日ごとに1行（請求額。リボ・分割の返済を含む）
- * - 給与は給料日に入るので、ここには入らない。現金で使う分は口座が動かないので入れない
- */
-export function balanceAfterDebits(d: Data, today: string) {
-  const p = projection(d, today);
+export function accountFlow(d: Data, today: string, to?: string) {
   const now = accountNow(d, today);
-  if (!p || !now) return null;
-  const payday = nextPayday(d.settings, today);
+  if (!now) return null;
+  const end = to ?? nextPayday(d.settings, today);
   const cur = ymOf(today);
-  // 日付が過ぎたのに予定のままのものは、今日起きるものとして数える（projection が今日に寄せている）
-  const ahead = p.events.filter((ev) => (ev.date > today || (ev.date === today && ev.entry?.status === "plan")) && (ymOf(ev.date) === cur || ev.date < payday));
-  const rows = flowRows(d, ahead, now.bank);
-  const until = (pred: (r: FlowRow) => boolean) => rows.filter(pred).reduce((a, r) => a + r.delta, now.bank);
-  return {
-    now, payday, rows,
-    afterThisMonth: until((r) => ymOf(r.date) === cur),
-    beforePayday: until((r) => r.date < payday),
-  };
+  const all = accountsWithBills(d, today, [cur, addMonths(cur, 1), addMonths(cur, 2)]);
+  const ahead = all.filter((e) => e.account === "bank" && ((e.date > today && e.date < end) || (e.status === "plan" && e.date <= today)));
+  const items = ahead.map((e) => ({ e, date: e.date > today ? e.date : today, overdue: e.date <= today }));
+  items.sort((a, b) => a.date.localeCompare(b.date) || byDate(a.e, b.e));
+  let v = now.bank;
+  const rows: FlowRow[] = items.map(({ e, date, overdue }) => ({ date, entry: e, delta: signedAmount(e), balance: (v += signedAmount(e)), overdue }));
+  return { now, end, rows, last: v, short: v < d.settings.safety ? d.settings.safety - v : 0 };
 }
+
+// ---------- 来月の支払い予定（§5.6） ----------
+
+export interface NextPayments {
+  ym: string;
+  other: number; // そのほか（分割（返済）と立替）
+  accountOut: number; // 口座からの出金予定（クレカ支払い以外）
+  cardVar: number; // クレカの変動費
+  cardFixed: number; // クレカの固定費
+  total: number;
+}
+
+/** 来月 ym に口座から出るお金 */
+export function nextPayments(d: Data, ym: string): NextPayments {
+  const r: NextPayments = { ym, other: 0, accountOut: 0, cardVar: 0, cardFixed: 0, total: 0 };
+  for (const b of billsFor(d, ym)) {
+    for (const e of b.items) {
+      const own = ownCost(e), part = e.amount - own;
+      if (e.group === "variable") { r.cardVar += own; r.other += part; }
+      else if (e.group === "fixed") { r.cardFixed += own; r.other += part; }
+      else r.other += e.amount;
+    }
+    // 請求額が確定していれば、その差は変動費で調整する
+    if (b.amount !== b.estimate) r.cardVar += b.amount - b.estimate;
+  }
+  r.accountOut = d.accounts.filter((e) => e.account === "bank" && e.direction === "out" && e.group !== "card" && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0);
+  r.total = r.other + r.accountOut + r.cardVar + r.cardFixed;
+  return r;
+}
+
+// ---------- 計画をつくる（§5.7） ----------
+
+export interface PlanInput { from: string; monthly: number; useBonus: boolean; saved: number; target: number; months?: number }
+export interface PlanRow { ym: string; put: number; bonus: number; debtLeft: number; saved: number; free: number }
+export interface PlanResult { rows: PlanRow[]; payoffYm: string | null; reachYm: string | null; minFree: number }
+
+/** 返済・積立に回す賞与か（入金・その他のうち、名称に「賞与」とあるもの） */
+export const isBonus = (e: AccountEntry) => e.direction === "in" && e.group === "other" && /賞与|ボーナス/.test(e.name);
+
+/** 返済の目標の、その月の返済の予定の合計 */
+function repayDue(d: Data, ym: string): number {
+  return d.goals.filter((g) => g.active && g.kind === "repay").reduce((a, g) => a + (goalSchedule(g, d.settings, ym, 1)[0]?.pay ?? 0), 0);
+}
+
+/**
+ * 毎月 monthly を回したときの見通し。リボが残っている間は max(monthly, その月の返済の予定)。賞与を回すなら、その月の賞与も足す。
+ * 回した額はまずリボの残りに、なくなったら貯金に入れる。利息・手数料は入れない
+ */
+export function planGoals(d: Data, p: PlanInput): PlanResult {
+  const n = p.months ?? 36;
+  let debt = d.goals.filter((g) => g.active && g.kind === "repay").reduce((a, g) => a + g.balance, 0);
+  let saved = p.saved;
+  const rows: PlanRow[] = [];
+  let payoffYm: string | null = debt <= 0 ? p.from : null, reachYm: string | null = null, minFree = Infinity;
+  for (let k = 0; k < n; k++) {
+    const ym = addMonths(p.from, k);
+    const b = monthBase(d, ym);
+    const bonus = p.useBonus ? d.accounts.filter((e) => isBonus(e) && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0) : 0;
+    const put = debt > 0 ? Math.max(p.monthly, repayDue(d, ym)) : p.monthly;
+    let pool = put + bonus;
+    const toDebt = Math.min(debt, pool);
+    debt -= toDebt; pool -= toDebt; saved += pool;
+    const free = (b.salary || d.settings.salaryEstimate) + b.extra - b.fixed - put;
+    minFree = Math.min(minFree, free);
+    rows.push({ ym, put, bonus, debtLeft: debt, saved, free });
+    if (!payoffYm && debt <= 0) payoffYm = ym;
+    if (!reachYm && debt <= 0 && saved >= p.target) reachYm = ym;
+  }
+  return { rows, payoffYm, reachYm, minFree: minFree === Infinity ? 0 : minFree };
+}
+
+/** by の月までに目標に届く、いちばん少ない毎月の額（1,000円単位）。届かなければ null */
+export function monthlyFor(d: Data, p: Omit<PlanInput, "monthly">, by: string, max = 1_000_000): number | null {
+  const ok = (m: number) => { const r = planGoals(d, { ...p, monthly: m }); return !!r.reachYm && r.reachYm <= by; };
+  if (!ok(max)) return null;
+  let lo = 0, hi = max / 1000;
+  while (lo < hi) { const mid = Math.floor((lo + hi) / 2); if (ok(mid * 1000)) hi = mid; else lo = mid + 1; }
+  return lo * 1000;
+}
+
+/** 日付が過ぎたのに予定のままの手入力の予定（口座明細）。自動で作ったものは計上日に自動で確定する */
+export function overduePlans(d: Data, today: string): AccountEntry[] {
+  return d.accounts.filter((e) => e.status === "plan" && e.source === "manual" && e.date < today);
+}
+

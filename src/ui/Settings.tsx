@@ -1,20 +1,23 @@
 import { useEffect, useState } from "react";
-import { budgetCats, computeMonth, goalPlan, INCOME_EXTRA, INCOME_SALARY, isLive, monthBase, OUTSIDE, REPAY, RESERVE, todayJST, type BaseField, type CardDef, type Debt, type Method, type Recurring, type Settings as S } from "../engine";
+import {
+  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, computeMonth, goalOutlook, groupOfCat, IN_GROUPS, monthBase, RESERVE, todayJST, ymOf,
+  type AccountGroup, type CardDef, type CardGroup, type Goal, type Lump, type Recurring, type Settings as S,
+} from "../engine";
 import { actions, type AppData, type ImportFile, type Store } from "../data/store";
 import { backend, resetLocal } from "../data/backend";
 import { VERSION_LABEL } from "./version";
-import { ALL_METHODS, Chip, fromPayKey, payKey, payKeys, payLabels, Field, md, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
+import { Chip, Field, md, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
 
-type Tab = "budget" | "income" | "recurring" | "rules" | "debts" | "assets" | "data";
-const TABS: [Tab, string][] = [["budget", "予算"], ["income", "給与・賞与"], ["recurring", "定期のお金"], ["rules", "お店のルール"], ["debts", "借金"], ["assets", "費目と口座"], ["data", "データ"]];
+type Tab = "budget" | "goals" | "income" | "recurring" | "rules" | "assets" | "data";
+const TABS: [Tab, string][] = [["budget", "予算"], ["goals", "目標"], ["income", "給与・賞与"], ["recurring", "定期"], ["rules", "お店のルール"], ["assets", "費目とカード"], ["data", "データ"]];
 /** それぞれのタブを、いつ・何のために触るか */
 const TAB_HELP: Record<Tab, string> = {
-  budget: "月に1回（給料日のころ）。その月の予算の元（給与・目標用マイナス）を確かめ、費目に予算を割り振る。直さなければ前の月のまま使う",
+  budget: "月に1回（給料日のころ）。ヘッダーの月で、その月（来月も）の予算を確かめて、費目に割り振る。直さなければ前の月のまま使う",
+  goals: "リボ・分割を0にする目標と、積立の目標。毎月の額を決めると、毎月の目標用マイナスと返済の予定が自動でできる",
   income: "給与の見込み額や給料日が変わったとき、賞与や臨時の入金が決まったときに入れる",
   recurring: "家賃・奨学金・通信・サブスクなど、毎月決まった支払いが増えた・変わった・やめたとき",
   rules: "カードの明細の費目がまちがって入るとき。ふだんは明細の費目を直せば、ここに自動で覚える",
-  debts: "リボ・分割の残高をカード会社の画面で見たときに直す。目標と見通しに使う",
-  assets: "費目を増やす・固定費か変動費かを変える、給料日・カードの引落日・安全残高を変えるとき（めったに触らない）",
+  assets: "費目を増やす・固定費か変動費かを変える、給料日・カードの締め日と引落日・安全残高を変えるとき（めったに触らない）",
   data: "前の家計簿からの取り込みや、データの書き出し（めったに触らない）",
 };
 
@@ -30,10 +33,10 @@ export function SettingsView({ store, data, month }: { store: Store; data: AppDa
       </section>
       <div className="note" style={{ marginTop: -16, marginBottom: 20 }}>{TAB_HELP[tab]}</div>
       {tab === "budget" && <Budgets store={store} data={data} month={month} />}
+      {tab === "goals" && <Goals store={store} data={data} />}
       {tab === "income" && <Income store={store} data={data} />}
       {tab === "recurring" && <RecurringList store={store} data={data} />}
       {tab === "rules" && <Rules store={store} data={data} />}
-      {tab === "debts" && <Debts store={store} data={data} />}
       {tab === "assets" && <Assets store={store} data={data} />}
       {tab === "data" && <DataTab store={store} data={data} />}
     </>
@@ -42,82 +45,47 @@ export function SettingsView({ store, data, month }: { store: Store; data: AppDa
 
 // ---------- 予算 ----------
 
-const BASE_ROWS: { key: BaseField; label: string; hint: string; sign: string }[] = [
-  { key: "salary", label: "給与", hint: "その月の給与の予定・入金から（給与にした収入）", sign: "" },
-  { key: "extra", label: "追加予算", hint: "イベチケなど、「追加予算」にした入金", sign: "＋" },
-  { key: "fixed", label: "固定費", hint: "大項目が固定費の費目（家賃・奨学金・通信・サブスクなど）の予算の合計。下の「固定費の予算」で直す", sign: "−" },
-  { key: "goal", label: "目標用マイナス", hint: "リボの返済の計画分＋貯金。初期値はその月の返済の予定＋毎月の貯金", sign: "−" },
-];
-
-/** 予算の元（給与・追加予算・固定費・目標用マイナス）。自動の値を出し、手で直せる */
+/** 予算の元（給与・追加予算・固定費・目標用マイナス）。目標用マイナスだけ、この月だけ手で直せる */
 function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; month: string }) {
   const b = monthBase(data, month);
-  const [edit, setEdit] = useState<BaseField | null>(null);
+  const [edit, setEdit] = useState(false);
   const [val, setVal] = useState<number | "">("");
-  const save = async (key: BaseField, amount: number | null) => {
-    if (key === "fixed") return;
-    if (await store.run(() => actions.saveBase(month, key, amount))) { toast(amount == null ? "自動に戻しました" : "保存しました"); setEdit(null); }
+  const save = async (amount: number | null) => {
+    if (await store.run(() => actions.saveGoalMinus(month, amount))) { toast(amount == null ? "目標マスタの額に戻しました" : "保存しました"); setEdit(false); }
   };
-  return (
-    <section>
-      <h2>{ymLabel(month)}の予算 <small>自由に使えるお金 {signed(b.T)}円</small></h2>
-      <div className="panel">
-        {BASE_ROWS.map((r) => (
-          <div key={r.key} style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
-            <div className="legend" style={{ justifyContent: "space-between" }}>
-              <span><b style={{ color: "var(--ink)" }}>{r.sign} {r.label}</b> {r.key === "fixed" ? <Chip>費目の予算から</Chip> : b.manual[r.key] ? <Chip kind="warn">手で入力</Chip> : <Chip>自動</Chip>}</span>
-              <b className="num">{yen(b[r.key])}円</b>
-            </div>
-            <div className="note">{r.hint}{b.manual[r.key] ? `（自動なら ${yen(b.auto[r.key])}円）` : ""}{r.key === "goal" && !b.manual.goal ? `：返済 ${yen(b.repay)}＋貯金 ${yen(b.saving)}` : ""}</div>
-            {edit === r.key ? (
-              <div className="btns" style={{ alignItems: "center" }}>
-                <div style={{ width: 140 }}><NumInput value={val} onChange={setVal} autoFocus /></div>
-                <button className="btn sm" onClick={() => save(r.key, val === "" ? 0 : val)}>保存</button>
-                <button className="btn sm ghost" onClick={() => setEdit(null)}>やめる</button>
-              </div>
-            ) : r.key === "fixed" ? null : (
-              <div className="btns">
-                <button className="btn sm ghost" onClick={() => { setEdit(r.key); setVal(b[r.key]); }}>直す</button>
-                {b.manual[r.key] && <button className="btn sm ghost" onClick={() => save(r.key, null)}>自動に戻す</button>}
-              </div>
-            )}
-          </div>
-        ))}
-        <div className="legend" style={{ justifyContent: "space-between" }}><b style={{ color: "var(--ink)" }}>＝ 自由に使えるお金</b><b className="num">{signed(b.T)}円</b></div>
-      </div>
-    </section>
+  const line = (label: string, v: number, hint: string, chip?: React.ReactNode) => (
+    <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
+      <div className="legend" style={{ justifyContent: "space-between" }}><span><b style={{ color: "var(--ink)" }}>{label}</b> {chip}</span><b className="num">{yen(v)}円</b></div>
+      <div className="note">{hint}</div>
+    </div>
   );
-}
-
-/** 目標用マイナスをこのままにしたら、リボと貯金がどうなるか */
-function GoalOutlook({ store, data, month }: { store: Store; data: AppData; month: string }) {
-  const s = data.settings;
-  const g = goalPlan(data, month, 12);
-  const debt = data.debts.reduce((a, x) => a + x.balance, 0);
-  const [saving, setSaving] = useState<number | "">(s.savingMonthly || "");
-  const [start, setStart] = useState(s.savingStart ?? "");
-  const saveSaving = async () => { if (await store.run(() => actions.saveSettings({ ...s, savingMonthly: Number(saving) || 0, savingStart: start || null }))) toast("保存しました"); };
   return (
     <section>
-      <h2>この目標用マイナスだと <small>12か月の見通し</small></h2>
+      <h2>{ymLabel(month)}の予算 <small>{signed(b.T)}円</small></h2>
       <div className="panel">
-        <div className="legend" style={{ justifyContent: "space-between" }}><span>リボ・分割の残り（いま）</span><b className="num">{yen(debt)}円</b></div>
-        <div className="legend" style={{ justifyContent: "space-between" }}><span>リボ・分割が0になる見込み</span><b>{g.payoffYm ? ymLabel(g.payoffYm) : "12か月では0にならない"}</b></div>
-        {s.reserveGoal > 0 && <div className="legend" style={{ justifyContent: "space-between" }}><span>貯金が目標（{yen(s.reserveGoal)}円）に届く見込み</span><b>{g.reachYm ? ymLabel(g.reachYm) : "12か月では届かない"}</b></div>}
-        <div className="scroll">
-          <table className="tbl">
-            <thead><tr><th>月</th><th>目標用</th><th>賞与</th><th>返済へ</th><th>貯金へ</th><th>リボの残り</th><th>貯金</th></tr></thead>
-            <tbody>{g.rows.map((r) => (
-              <tr key={r.ym}><td>{r.ym.slice(2, 4)}/{+r.ym.slice(5)}</td><td className="num">{yen(r.goal)}</td><td className="num">{r.bonus ? yen(r.bonus) : "―"}</td><td className="num">{yen(r.toDebt)}</td><td className="num">{yen(r.toSaving)}</td><td className="num">{yen(r.debtLeft)}</td><td className="num">{yen(r.saved)}</td></tr>
-            ))}</tbody>
-          </table>
+        {line("給与", b.salary, "その月の口座明細の入金のうち、大費目が給与のもの（予定を含む）。直すときは明細や予定を直す")}
+        {line("＋ 追加予算", b.extra, "その月の口座明細の入金のうち、大費目が追加予算のもの（イベチケなど）")}
+        {line("− 固定費", b.fixed, "固定費の費目の予算（見込み）の合計。下の「固定費」で直す")}
+        <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
+          <div className="legend" style={{ justifyContent: "space-between" }}>
+            <span><b style={{ color: "var(--ink)" }}>− 目標用マイナス</b> {b.goalManual ? <Chip kind="warn">この月だけ直した</Chip> : <Chip>目標マスタから</Chip>}</span>
+            <b className="num">{yen(b.goal)}円</b>
+          </div>
+          <div className="note">目標マスタの、その月の毎月の額＋臨時の額{b.goalManual ? `（目標マスタなら ${yen(b.goalAuto)}円）` : ""}</div>
+          {edit ? (
+            <div className="btns" style={{ alignItems: "center" }}>
+              <div style={{ width: 140 }}><NumInput value={val} onChange={setVal} autoFocus /></div>
+              <button className="btn sm" onClick={() => save(val === "" ? 0 : val)}>保存</button>
+              <button className="btn sm ghost" onClick={() => setEdit(false)}>やめる</button>
+            </div>
+          ) : (
+            <div className="btns">
+              <button className="btn sm ghost" onClick={() => { setEdit(true); setVal(b.goal); }}>この月だけ直す</button>
+              {b.goalManual && <button className="btn sm ghost" onClick={() => save(null)}>目標マスタの額に戻す</button>}
+            </div>
+          )}
         </div>
-        <div className="note">毎月の目標用マイナスと、予定に入っている賞与（内容に「賞与」とある、予算に入れない入金）を、まずリボ・分割の返済に回し、なくなったら貯金に回すとして計算しています。利息・手数料は入れていません。予定にない月は「毎月の貯金」だけで数えます。</div>
-        <div className="grid2">
-          <Field label="毎月の貯金（目標用マイナスの初期値に入る）"><NumInput value={saving} onChange={setSaving} /></Field>
-          <Field label="貯金を始める月"><input type="month" value={start} onChange={(e) => setStart(e.target.value)} /></Field>
-        </div>
-        <div className="btns"><button className="btn sm" onClick={saveSaving}>保存</button></div>
+        <div className="legend" style={{ justifyContent: "space-between" }}><b style={{ color: "var(--ink)" }}>＝ {ymLabel(month)}の予算</b><b className="num">{signed(b.T)}円</b></div>
       </div>
     </section>
   );
@@ -132,12 +100,11 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   const [vals, setVals] = useState(init);
   useEffect(() => setVals(init()), [month, data]); // eslint-disable-line react-hooks/exhaustive-deps
   const sumOf = (cs: string[]) => cs.reduce((a, c) => a + (Number(vals[c]) || 0), 0);
-  // 入力中の値で、予算の元と予備を出し直す（固定費を直すと、自由に使えるお金も変わる）
+  // 入力中の値で、予算と予備を出し直す（固定費を直すと、今月の予算も変わる）
   const fixedSum = sumOf(st.fixCats);
   const free = v.base.salary + v.base.extra - fixedSum - v.base.goal;
   const reserve = free - sumOf(st.varCats);
   const own = data.budgets.some((b) => b.month === month && !b.category.startsWith("#") && b.category !== RESERVE);
-
   const save = async () => {
     const map = Object.fromEntries(cats.map((c) => [c, Number(vals[c]) || 0]));
     if (await store.run(() => actions.saveBudgets(month, map))) toast(`${ymLabel(month)}の予算を保存しました`);
@@ -157,20 +124,117 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
         <div className="panel">
           <h2>固定費 <small>合計 {yen(fixedSum)}円（給与から引く）</small></h2>
           <div className="budgetgrid">{grid(st.fixCats)}</div>
-          <div className="note">毎月の見込みの額を入れます。予算を入れていない費目は、定期のお金の額を使います。見込みをこえて引かれた分は、自由に使える残りから引きます。</div>
-          <h2 style={{ marginTop: 8 }}>変動費 <small>自由に使えるお金 {signed(free)}円 を割り振る</small></h2>
+          <div className="note">毎月の見込みの額。予算を入れていない費目は、定期マスタの額を使います。見込みをこえた分は残り予算から引きます。</div>
+          <h2 style={{ marginTop: 8 }}>変動費 <small>今月の予算 {signed(free)}円 を割り振る</small></h2>
           <div className="budgetgrid">
             {grid(st.varCats)}
             <span><b>予備</b><span className="note">（自動で残りが入る）</span></span>
             <b className={`num ${reserve < 0 ? "neg" : ""}`} style={{ textAlign: "right" }}>{signed(reserve)}</b>
           </div>
-          {reserve < 0 && <div className="alert">自由に使えるお金より {yen(-reserve)}円 多く割り振っています。どこかを減らしてください。</div>}
+          {reserve < 0 && <div className="alert">今月の予算より {yen(-reserve)}円 多く割り振っています。どこかを減らしてください。</div>}
           <div className="btns"><button className="btn" onClick={save}>この月の費目予算を保存</button></div>
-          <div className="note">保存しない月は、前の月の費目予算をそのまま使います。費目の大項目（固定費／変動費）は「費目と資産・カード」で変えられます。</div>
+          <div className="note">保存しない月は、前の月の費目予算をそのまま使います。Claude と相談して決めた予算は、JSON にして「データ」から取り込めます。</div>
         </div>
       </section>
-      <GoalOutlook store={store} data={data} month={month} />
     </>
+  );
+}
+
+// ---------- 目標 ----------
+
+function Goals({ store, data }: { store: Store; data: AppData }) {
+  const today = todayJST();
+  const [edit, setEdit] = useState<Partial<Goal> | null>(null);
+  const out = goalOutlook(data, ymOf(today), 36);
+  const cards = Object.fromEntries(data.settings.cards.map((c) => [c.id, c.name]));
+  return (
+    <section>
+      <h2>目標マスタ
+        <span className="btns" style={{ display: "inline-flex", marginLeft: 8 }}>
+          <button className="btn ghost sm" onClick={() => setEdit({ kind: "repay", name: "", card: data.settings.cards[0].id, balance: 0, as_of: today, monthly: 0, day: 27, lumps: [], active: true })}>＋ 返済</button>
+          <button className="btn ghost sm" onClick={() => setEdit({ kind: "save", name: "給料1か月分の積立", target: data.settings.salaryEstimate, balance: 0, monthly: 20000, start_month: ymOf(today), lumps: [], active: true })}>＋ 積立</button>
+        </span>
+      </h2>
+      <div className="panel">
+        {data.goals.length ? <div className="list">{data.goals.map((g) => {
+          const o = out.find((x) => x.goal.id === g.id);
+          return (
+            <button className="row" key={g.id} onClick={() => setEdit(g)} style={{ gridTemplateColumns: "1fr auto" }}>
+              <span className="t">
+                <div>{g.name} <Chip>{g.kind === "repay" ? "返済" : "積立"}</Chip> {!g.active && <Chip>止めている</Chip>}</div>
+                <div>{g.kind === "repay" ? `${g.card ? cards[g.card] ?? g.card : "口座から"}・毎月 ${yen(g.monthly)}円・${o?.doneYm ? `${ymLabel(o.doneYm)}に0` : "36か月では0にならない"}` : `毎月 ${yen(g.monthly)}円・${g.start_month ? `${ymLabel(g.start_month)}から` : ""}・${o?.doneYm ? `${ymLabel(o.doneYm)}に届く` : "36か月では届かない"}`}{g.lumps.length ? `・臨時 ${g.lumps.length}件` : ""}</div>
+              </span>
+              <span className="a num">{yen(g.kind === "repay" ? g.balance : g.target)}</span>
+            </button>
+          );
+        })}</div> : <div className="note">まだありません。リボ・分割があれば「返済」、貯めたい額があれば「積立」を入れてください。</div>}
+        <div className="note">その月の目標用マイナス ＝ 動いている目標の毎月の額 ＋ 臨時の額。返済の目標からは、毎月の返済の予定（カードならクレカ明細の分割（返済））が自動でできます。見通しはメニューの「目標」、まとめて決めるならメニューの「計画をつくる」。</div>
+      </div>
+      {edit && <GoalSheet store={store} data={data} g={edit} onClose={() => setEdit(null)} />}
+    </section>
+  );
+}
+
+function GoalSheet({ store, data, g, onClose }: { store: Store; data: AppData; g: Partial<Goal>; onClose: () => void }) {
+  const today = todayJST();
+  const [x, setX] = useState<Partial<Goal>>(g);
+  const set = (p: Partial<Goal>) => setX({ ...x, ...p });
+  const [lump, setLump] = useState<Lump>({ date: "", amount: 0, memo: "" });
+  const repay = x.kind === "repay";
+  const save = async () => {
+    if (!x.name) { toast("名前を入れてください"); return; }
+    const row = { ...x, as_of: repay && (x.balance !== g.balance || !x.as_of) ? today : x.as_of ?? null };
+    if (await store.run(() => actions.saveGoal(data, row, today))) { toast("保存しました"); onClose(); }
+  };
+  const remove = async () => {
+    if (!x.id || !confirm("この目標を消しますか？（これからの返済の予定も消えます）")) return;
+    if (await store.run(() => actions.deleteGoal(data, x.id!, today))) { toast("消しました"); onClose(); }
+  };
+  const cardIds = ["", ...data.settings.cards.map((c) => c.id)];
+  return (
+    <Sheet title={x.id ? x.name || "目標" : repay ? "返済の目標を追加" : "積立の目標を追加"} onClose={onClose}>
+      <Field label="名前"><input value={x.name ?? ""} onChange={(e) => set({ name: e.target.value })} /></Field>
+      {repay ? (
+        <>
+          <div className="grid2">
+            <Field label="返済するカード" hint="空なら口座から振り込む"><Select value={x.card ?? ""} options={cardIds} labels={{ "": "口座から", ...Object.fromEntries(data.settings.cards.map((c) => [c.id, c.name])) }} onChange={(v) => set({ card: v || null })} /></Field>
+            <Field label="残高（いま）"><NumInput value={x.balance ?? ""} onChange={(v) => set({ balance: v === "" ? 0 : v })} /></Field>
+            <Field label="毎月の返済額"><NumInput value={x.monthly ?? ""} onChange={(v) => set({ monthly: v === "" ? 0 : v })} /></Field>
+            {!x.card && <Field label="口座から払う日"><NumInput value={x.day ?? ""} onChange={(v) => set({ day: v === "" ? 27 : v })} /></Field>}
+          </div>
+          <div className="note">残高を直すと、今日の残高として数え直します（{x.as_of ? `いまは ${md(x.as_of)} の残高` : "日付なし"}）。</div>
+        </>
+      ) : (
+        <div className="grid2">
+          <Field label="目標額"><NumInput value={x.target ?? ""} onChange={(v) => set({ target: v === "" ? 0 : v })} /></Field>
+          <Field label="もうたまっている額"><NumInput value={x.balance ?? ""} onChange={(v) => set({ balance: v === "" ? 0 : v })} /></Field>
+          <Field label="毎月積み立てる額"><NumInput value={x.monthly ?? ""} onChange={(v) => set({ monthly: v === "" ? 0 : v })} /></Field>
+        </div>
+      )}
+      <div className="grid2">
+        <Field label="始める月（空なら今から）"><input type="month" value={x.start_month ?? ""} onChange={(e) => set({ start_month: e.target.value || null })} /></Field>
+        <Field label={repay ? "終わる月（空なら0になるまで）" : "終わる月（空なら目標額に届くまで）"}><input type="month" value={x.end_month ?? ""} onChange={(e) => set({ end_month: e.target.value || null })} /></Field>
+      </div>
+      <h2>臨時の{repay ? "返済" : "積立"} <small>賞与から一括など</small></h2>
+      {(x.lumps ?? []).map((l, i) => (
+        <div key={i} className="legend" style={{ justifyContent: "space-between" }}>
+          <span>{md(l.date)} {l.memo}</span>
+          <span><b className="num">{yen(l.amount)}円</b> <button className="btn sm ghost" onClick={() => set({ lumps: (x.lumps ?? []).filter((_, j) => j !== i) })}>消す</button></span>
+        </div>
+      ))}
+      <div className="grid2">
+        <Field label="日付"><input type="date" value={lump.date} onChange={(e) => setLump({ ...lump, date: e.target.value })} /></Field>
+        <Field label="額" hint={repay ? "残りより多ければ、残り全部" : undefined}><NumInput value={lump.amount || ""} onChange={(v) => setLump({ ...lump, amount: v === "" ? 0 : v })} /></Field>
+      </div>
+      <Field label="メモ"><input value={lump.memo} onChange={(e) => setLump({ ...lump, memo: e.target.value })} placeholder="賞与から全額 など" /></Field>
+      <div className="btns"><button className="btn sm ghost" onClick={() => { if (!lump.date || !lump.amount) return; set({ lumps: [...(x.lumps ?? []), lump] }); setLump({ date: "", amount: 0, memo: "" }); }}>臨時を足す</button></div>
+      <label className="check"><input type="checkbox" checked={x.active !== false} onChange={(e) => set({ active: e.target.checked })} />使う（外すと目標用マイナスと予定に入れない）</label>
+      <div className="btns">
+        <button className="btn" onClick={save}>保存</button>
+        <button className="btn ghost" onClick={onClose}>やめる</button>
+        {x.id && <button className="btn danger" onClick={remove}>消す</button>}
+      </div>
+    </Sheet>
   );
 }
 
@@ -179,25 +243,23 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
 function Income({ store, data }: { store: Store; data: AppData }) {
   const today = todayJST();
   const incomeRec = data.recurring.filter((r) => r.kind === "income");
-  const bonuses = data.entries.filter((e) => isLive(e) && e.kind === "income" && !e.recurring_id && e.date >= today.slice(0, 7)).sort((a, b) => a.date.localeCompare(b.date));
+  const extras = data.accounts.filter((e) => e.direction === "in" && !e.recurring_id && e.date >= today.slice(0, 7)).sort((a, b) => a.date.localeCompare(b.date));
   const [edit, setEdit] = useState<Partial<Recurring> | null>(null);
   const [bDate, setBDate] = useState("");
   const [bAmount, setBAmount] = useState<number | "">("");
   const [bName, setBName] = useState("賞与");
-
+  const [bGroup, setBGroup] = useState<AccountGroup>("other");
   const addBonus = async () => {
     if (!bDate || !bAmount) { toast("日付と金額を入れてください"); return; }
-    if (await store.run(() => actions.addEntry({ kind: "income", status: "plan", date: bDate, amount: bAmount, method: "bank", category: null, item: bName }))) {
-      toast("入金の予定を追加しました"); setBDate(""); setBAmount("");
-    }
+    if (await store.run(() => actions.addAccount({ account: "bank", direction: "in", status: "plan", group: bGroup, category: null, name: bName, date: bDate, amount: bAmount }))) { toast("入金の予定を入れました"); setBDate(""); setBAmount(""); }
   };
   return (
     <>
       <section>
-        <h2>毎月の収入（給与の見込み） <button className="btn ghost sm" onClick={() => setEdit({ name: "給与", kind: "income", category: INCOME_SALARY, amount: data.settings.salaryEstimate, day: data.settings.payday, shift: "next", method: "bank", active: true })}>＋ 追加</button></h2>
+        <h2>毎月の収入（給与の見込み） <button className="btn ghost sm" onClick={() => setEdit({ name: "給与", kind: "income", group: "salary", category: null, amount: data.settings.salaryEstimate, day: data.settings.payday, shift: "next", pay: "bank", active: true })}>＋ 追加</button></h2>
         <div className="panel">
           {incomeRec.length ? <div className="list">{incomeRec.map((r) => <RecRow key={r.id} r={r} s={data.settings} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません。「追加」から給与を入れると、毎月の入金の予定が自動でできます。</div>}
-          <div className="note">見込みの金額で予定を作ります。実際の入金があったら「予定」の画面で確定にしてください。</div>
+          <div className="note">見込みの額で予定を作り、給料日に自動で確定になります。額が違ったら、口座明細を開いて直してください。</div>
         </div>
       </section>
       <section>
@@ -206,12 +268,14 @@ function Income({ store, data }: { store: Store; data: AppData }) {
           <div className="grid2">
             <Field label="日付"><input type="date" value={bDate} onChange={(e) => setBDate(e.target.value)} /></Field>
             <Field label="金額"><NumInput value={bAmount} onChange={setBAmount} /></Field>
+            <Field label="名称"><input value={bName} onChange={(e) => setBName(e.target.value)} /></Field>
+            <Field label="大費目"><Select value={bGroup} options={IN_GROUPS} labels={ACCOUNT_GROUP_LABEL} onChange={setBGroup} /></Field>
           </div>
-          <Field label="内容"><input value={bName} onChange={(e) => setBName(e.target.value)} /></Field>
-          <div className="btns"><button className="btn" onClick={addBonus}>入金の予定を追加</button></div>
-          {bonuses.length > 0 && <div className="list">{bonuses.map((e) => (
+          <div className="note">賞与はふつう「その他」（予算に入れない）。名称に「賞与」とあれば、計画をつくるで返済・積立に回せます。</div>
+          <div className="btns"><button className="btn" onClick={addBonus}>入金の予定を入れる</button></div>
+          {extras.length > 0 && <div className="list">{extras.map((e) => (
             <div className="row" key={e.id} style={{ cursor: "default" }}>
-              <span className="d num">{md(e.date)}</span><span className="t"><div>{e.item || "入金"}</div><div>{e.status === "plan" ? "予定" : "確定"}</div></span><span className="a num">＋{yen(e.amount)}</span>
+              <span className="d num">{md(e.date)}</span><span className="t"><div>{e.name || "入金"}</div><div>{ACCOUNT_GROUP_LABEL[e.group]}・{e.status === "plan" ? "予定" : "確定"}</div></span><span className="a num">＋{yen(e.amount)}</span>
             </div>))}</div>}
         </div>
       </section>
@@ -220,14 +284,16 @@ function Income({ store, data }: { store: Store; data: AppData }) {
   );
 }
 
-// ---------- 定期のお金 ----------
+// ---------- 定期マスタ ----------
 
 const SHIFT_LABEL = { next: "後の平日", prev: "前の平日", none: "ずらさない" } as const;
+const payName = (s: S, r: Pick<Recurring, "pay" | "card">) => (r.pay === "card" ? s.cards.find((c) => c.id === r.card)?.name ?? s.cards[0].name : r.pay === "wallet" ? "財布" : "口座");
+const groupName = (r: Recurring) => (r.pay === "card" ? CARD_GROUP_LABEL[r.group as CardGroup] : ACCOUNT_GROUP_LABEL[r.group as AccountGroup]) ?? "";
 
 function RecRow({ r, s, onOpen }: { r: Recurring; s: S; onOpen: () => void }) {
   return (
     <button className="row" onClick={onOpen} style={{ gridTemplateColumns: "1fr auto" }}>
-      <span className="t"><div>{r.name} {!r.active && <span className="chip">止めている</span>}</div><div>毎月{r.day}日（土日祝は{SHIFT_LABEL[r.shift]}）・{payLabels(s)[payKey(s, r.method, r.card)]}{r.category ? `・${r.category}` : ""}{r.end_month ? `・${ymLabel(r.end_month)}まで` : ""}</div></span>
+      <span className="t"><div>{r.name} {!r.active && <span className="chip">止めている</span>}</div><div>毎月{r.day}日（土日祝は{SHIFT_LABEL[r.shift]}）・{payName(s, r)}・{groupName(r)}{r.category ? `・${r.category}` : ""}{r.end_month ? `・${ymLabel(r.end_month)}まで` : ""}</div></span>
       <span className="a num">{r.kind === "income" ? "＋" : ""}{yen(r.amount)}</span>
     </button>
   );
@@ -236,20 +302,20 @@ function RecRow({ r, s, onOpen }: { r: Recurring; s: S; onOpen: () => void }) {
 function RecurringList({ store, data }: { store: Store; data: AppData }) {
   const [edit, setEdit] = useState<Partial<Recurring> | null>(null);
   const exp = data.recurring.filter((r) => r.kind === "expense");
-  const fixed = exp.filter((r) => r.category && data.settings.fixCats.includes(r.category));
-  const others = exp.filter((r) => !fixed.includes(r));
+  const fixed = exp.filter((r) => r.group === "fixed");
+  const others = exp.filter((r) => r.group !== "fixed");
   return (
     <>
       <section>
-        <h2>定期のお金 <button className="btn ghost sm" onClick={() => setEdit({ kind: "expense", category: data.settings.fixCats[0] ?? null, day: 27, shift: "next", method: "bank", active: true, amount: 0, name: "" })}>＋ 追加</button></h2>
-        <div className="note">ここに入れたものから、今月〜5か月先の予定が自動でできます。給与は「給与・賞与」のタブにあります。</div>
+        <h2>定期マスタ <button className="btn ghost sm" onClick={() => setEdit({ kind: "expense", group: "fixed", category: data.settings.fixCats[0] ?? null, day: 27, shift: "next", pay: "bank", active: true, amount: 0, name: "" })}>＋ 追加</button></h2>
+        <div className="note">ここに入れたものから、今月〜5か月先の予定が自動でできます（口座・財布なら口座明細、クレカならクレカ明細）。給与は「給与・賞与」のタブ、リボ・分割の返済は「目標」のタブにあります。</div>
       </section>
       <section>
-        <h2>固定費 <small>家賃・奨学金・通信・サブスクなど 計 {yen(fixed.reduce((a, r) => a + (r.active ? r.amount : 0), 0))}円</small></h2>
+        <h2>固定費 <small>計 {yen(fixed.reduce((a, r) => a + (r.active ? r.amount : 0), 0))}円</small></h2>
         <div className="panel">{fixed.length ? <div className="list">{fixed.map((r) => <RecRow key={r.id} r={r} s={data.settings} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません</div>}</div>
       </section>
       <section>
-        <h2>そのほか <small>返済・変動費など 計 {yen(others.reduce((a, r) => a + (r.active ? r.amount : 0), 0))}円</small></h2>
+        <h2>そのほか <small>計 {yen(others.reduce((a, r) => a + (r.active ? r.amount : 0), 0))}円</small></h2>
         <div className="panel">{others.length ? <div className="list">{others.map((r) => <RecRow key={r.id} r={r} s={data.settings} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません</div>}</div>
       </section>
       {edit && <RecurringSheet store={store} data={data} r={edit} onClose={() => setEdit(null)} />}
@@ -258,13 +324,20 @@ function RecurringList({ store, data }: { store: Store; data: AppData }) {
 }
 
 function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppData; r: Partial<Recurring>; onClose: () => void }) {
+  const s = data.settings;
   const [x, setX] = useState<Partial<Recurring>>(r);
   const set = (p: Partial<Recurring>) => setX({ ...x, ...p });
-  const cats = ["", ...budgetCats(data.settings), REPAY, OUTSIDE];
   const today = todayJST();
+  const cats = ["", ...budgetCats(s).filter((c) => c !== RESERVE)];
+  const payKey = x.pay === "card" ? `card:${x.card ?? s.cards[0].id}` : x.pay ?? "bank";
+  const payKeys = ["bank", "wallet", ...s.cards.map((c) => `card:${c.id}`)];
+  const payLabels = { bank: "口座", wallet: "財布", ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, c.name])) };
+  const groups: string[] = x.kind === "income" ? IN_GROUPS : x.pay === "card" ? ["variable", "fixed", "installment"] : ["variable", "fixed", "other"];
+  const labels = x.pay === "card" ? CARD_GROUP_LABEL : ACCOUNT_GROUP_LABEL;
   const save = async () => {
     if (!x.name || !x.amount || !x.day) { toast("名前・金額・日を入れてください"); return; }
-    const row = { ...x, category: x.kind === "income" ? null : x.category || null };
+    const budgeted = x.kind === "expense" && (x.group === "variable" || x.group === "fixed");
+    const row = { ...x, category: budgeted ? x.category || null : null };
     if (await store.run(() => actions.saveRecurring(data, row, today))) { toast("保存しました"); onClose(); }
   };
   const remove = async () => {
@@ -273,19 +346,17 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
   };
   return (
     <Sheet title={x.id ? "定期のお金を直す" : "定期のお金を追加"} onClose={onClose}>
-      <div className="seg">{(["expense", "income"] as const).map((k) => <button key={k} aria-pressed={x.kind === k} onClick={() => set({ kind: k })}>{k === "income" ? "収入" : "支出"}</button>)}</div>
+      <div className="seg">{(["expense", "income"] as const).map((k) => <button key={k} aria-pressed={x.kind === k} onClick={() => set({ kind: k, group: k === "income" ? "salary" : "fixed", pay: k === "income" ? "bank" : x.pay })}>{k === "income" ? "入金" : "出金"}</button>)}</div>
       <Field label="名前"><input value={x.name ?? ""} onChange={(e) => set({ name: e.target.value })} /></Field>
       <div className="grid2">
         <Field label="金額（見込み）"><NumInput value={x.amount ?? ""} onChange={(v) => set({ amount: v === "" ? 0 : v })} /></Field>
-        <Field label="毎月の日（31＝月末）"><NumInput value={x.day ?? ""} onChange={(v) => set({ day: v === "" ? 1 : Math.min(31, Math.max(1, v)) })} /></Field>
-      </div>
-      <div className="grid2">
+        <Field label="毎月の日（31＝月末）" hint={x.pay === "card" ? "クレカは利用日" : undefined}><NumInput value={x.day ?? ""} onChange={(v) => set({ day: v === "" ? 1 : Math.min(31, Math.max(1, v)) })} /></Field>
         <Field label="土日祝のとき"><Select value={x.shift ?? "next"} options={["next", "prev", "none"] as const} labels={SHIFT_LABEL} onChange={(v) => set({ shift: v })} /></Field>
-        <Field label="金種"><Select value={payKey(data.settings, (x.method ?? "bank") as Method, x.card ?? null)} options={payKeys(data.settings, ALL_METHODS)} labels={payLabels(data.settings)} onChange={(v) => set(fromPayKey(v))} /></Field>
+        {x.kind === "expense" && <Field label="払い方"><Select value={payKey} options={payKeys} labels={payLabels} onChange={(v) => { const card = v.startsWith("card:") ? v.slice(5) : null; set({ pay: card ? "card" : (v as Recurring["pay"]), card, group: card && x.group === "other" ? "fixed" : !card && x.group === "installment" ? "other" : x.group }); }} /></Field>}
       </div>
-      {x.kind === "income" && <Field label="予算の扱い"><Select value={x.category ?? ""} options={[INCOME_SALARY, INCOME_EXTRA, ""]} labels={{ [INCOME_SALARY]: "給与（予算の元）", [INCOME_EXTRA]: "追加予算", "": "予算に入れない" }} onChange={(v) => set({ category: v || null })} /></Field>}
-      {x.kind === "expense" && <Field label="費目" hint="リボの返済は「返済」（目標用マイナスの中で払う）"><Select value={x.category ?? ""} options={cats} labels={{ "": "未分類" }} onChange={(v) => set({ category: v || null })} /></Field>}
-      {x.kind === "expense" && x.method === "card" && <Field label="お店の名前のヒント（なくてもよい）" hint="カードの明細のお店にこの言葉が入っていれば、費目が違ってもこの予定とまとめます（例：モバイルSuica）"><input value={x.shop ?? ""} onChange={(e) => set({ shop: e.target.value })} /></Field>}
+      <Field label="大費目"><Select value={(x.group ?? "fixed") as string} options={groups} labels={labels as Record<string, string>} onChange={(v) => set({ group: v as Recurring["group"] })} /></Field>
+      {x.kind === "expense" && (x.group === "variable" || x.group === "fixed") && <Field label="費目"><Select value={x.category ?? ""} options={cats} labels={{ "": "未分類" }} onChange={(v) => set({ category: v || null, group: v ? groupOfCat(s, v) : x.group })} /></Field>}
+      {x.kind === "expense" && x.pay === "card" && <Field label="お店の名前のヒント（なくてもよい）" hint="カードの明細のお店にこの言葉が入っていれば、費目が違ってもこの予定とまとめます（例：モバイルSuica）"><input value={x.shop ?? ""} onChange={(e) => set({ shop: e.target.value })} /></Field>}
       <div className="grid2">
         <Field label="始める月（空なら今から）"><input type="month" value={x.start_month ?? ""} onChange={(e) => set({ start_month: e.target.value || null })} /></Field>
         <Field label="終わる月（空ならずっと）"><input type="month" value={x.end_month ?? ""} onChange={(e) => set({ end_month: e.target.value || null })} /></Field>
@@ -303,7 +374,7 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
 // ---------- 費目のルール ----------
 
 function Rules({ store, data }: { store: Store; data: AppData }) {
-  const cats = [...budgetCats(data.settings), REPAY, OUTSIDE];
+  const cats = budgetCats(data.settings).filter((c) => c !== RESERVE);
   const [pattern, setPattern] = useState("");
   const [cat, setCat] = useState(cats[0]);
   const [q, setQ] = useState("");
@@ -316,7 +387,7 @@ function Rules({ store, data }: { store: Store; data: AppData }) {
     <section>
       <h2>お店→費目のルール <small>{data.rules.length}件</small></h2>
       <div className="panel">
-        <div className="note">カードのメールのお店の名前に、この言葉が入っていれば費目を自動で入れます（いちばん長く一致したもの）。明細の費目を直すと自動で増えます。</div>
+        <div className="note">カードのメールのお店の名前に、この言葉が入っていれば費目を自動で入れます（いちばん長く一致したもの）。大費目は費目から決まります。明細の費目を直すと自動で増えます。</div>
         <div className="grid2">
           <Field label="お店の名前に入る言葉"><input value={pattern} onChange={(e) => setPattern(e.target.value)} /></Field>
           <Field label="費目"><Select value={cat} options={cats} onChange={setCat} /></Field>
@@ -333,68 +404,20 @@ function Rules({ store, data }: { store: Store; data: AppData }) {
   );
 }
 
-// ---------- 借金 ----------
-
-function Debts({ store, data }: { store: Store; data: AppData }) {
-  const [edit, setEdit] = useState<Partial<Debt> | null>(null);
-  return (
-    <section>
-      <h2>リボ・分割 <button className="btn ghost sm" onClick={() => setEdit({ name: "", balance: 0, rate: "", min_payment: 0, note: "", planned: false })}>＋ 追加</button></h2>
-      <div className="panel">
-        {data.debts.length ? <div className="list">{data.debts.map((d) => (
-          <button className="row" key={d.id} onClick={() => setEdit(d)} style={{ gridTemplateColumns: "1fr auto" }}>
-            <span className="t"><div>{d.name} {d.planned && <span className="chip warn">予定</span>}</div><div>{d.as_of ? `${md(d.as_of)}時点・` : ""}最低返済 {yen(d.min_payment)}円{d.note ? `・${d.note}` : ""}</div></span>
-            <span className="a num">{yen(d.balance)}</span>
-          </button>))}</div> : <div className="note">ありません</div>}
-        <div className="note">毎月の返済は「返済」費目の支出として予算に入れます。返済の予算が最低返済額より少ないと警告します。</div>
-      </div>
-      {edit && <DebtSheet store={store} d={edit} onClose={() => setEdit(null)} />}
-    </section>
-  );
-}
-
-function DebtSheet({ store, d, onClose }: { store: Store; d: Partial<Debt>; onClose: () => void }) {
-  const [x, setX] = useState(d);
-  const set = (p: Partial<Debt>) => setX({ ...x, ...p });
-  const save = async () => {
-    if (!x.name) { toast("名前を入れてください"); return; }
-    const row = { ...x, as_of: x.balance !== d.balance || !x.as_of ? todayJST() : x.as_of };
-    if (await store.run(() => actions.saveDebt(row))) { toast("保存しました"); onClose(); }
-  };
-  return (
-    <Sheet title={x.id ? x.name || "借金" : "借金を追加"} onClose={onClose}>
-      <Field label="名前"><input value={x.name ?? ""} onChange={(e) => set({ name: e.target.value })} /></Field>
-      <div className="grid2">
-        <Field label="残高"><NumInput value={x.balance ?? ""} onChange={(v) => set({ balance: v === "" ? 0 : v })} /></Field>
-        <Field label="毎月の最低返済額"><NumInput value={x.min_payment ?? ""} onChange={(v) => set({ min_payment: v === "" ? 0 : v })} /></Field>
-      </div>
-      <Field label="金利・手数料"><input value={x.rate ?? ""} onChange={(e) => set({ rate: e.target.value })} /></Field>
-      <Field label="メモ（次の返済・完済の予定など）"><textarea rows={3} value={x.note ?? ""} onChange={(e) => set({ note: e.target.value })} /></Field>
-      <label className="check"><input type="checkbox" checked={!!x.planned} onChange={(e) => set({ planned: e.target.checked })} />まだ借りていない（予定）</label>
-      <div className="btns">
-        <button className="btn" onClick={save}>保存</button>
-        <button className="btn ghost" onClick={onClose}>やめる</button>
-        {x.id && <button className="btn danger" onClick={async () => { if (confirm("消しますか？") && await store.run(() => actions.deleteDebt(x.id!))) onClose(); }}>消す</button>}
-      </div>
-    </Sheet>
-  );
-}
-
-// ---------- 資産・カード ----------
+// ---------- 費目とカード ----------
 
 function Assets({ store, data }: { store: Store; data: AppData }) {
   const [s, setS] = useState<S>(data.settings);
-  const n = (k: keyof S) => <NumInput value={s[k] as number} onChange={(v) => setS({ ...s, [k]: v === "" ? 0 : v })} />;
+  const n = (k: "safety" | "payday" | "salaryEstimate") => <NumInput value={s[k]} onChange={(v) => setS({ ...s, [k]: v === "" ? 0 : v })} />;
   const save = async () => { if (await store.run(() => actions.saveSettings(s))) toast("保存しました"); };
   return (
     <section>
-      <h2>資産・カードの設定</h2>
+      <h2>費目とカードの設定</h2>
       <div className="panel">
-        <Field label="安全残高（口座にいつも残しておく額）" hint="残り予算は、引落日までこの額を下回らないように計算します">{n("safety")}</Field>
-        <Field label="目標残高（給料日前日に残したい額）">{n("reserveGoal")}</Field>
+        <Field label="安全残高（口座にいつも残しておく額）" hint="給料日の前日に残る額がこれより少ないと赤くします">{n("safety")}</Field>
         <div className="grid2">
           <Field label="給料日">{n("payday")}</Field>
-          <Field label="給与の見込み額">{n("salaryEstimate")}</Field>
+          <Field label="給与の見込み額" hint="給与の予定がない先の月に使う">{n("salaryEstimate")}</Field>
         </div>
         {s.cards.map((c, i) => {
           const setC = (p: Partial<CardDef>) => setS({ ...s, cards: s.cards.map((x, j) => (j === i ? { ...x, ...p } : x)) });
@@ -442,7 +465,7 @@ function DataTab({ store, data }: { store: Store; data: AppData }) {
       <div className="panel">
         <div className="note">アプリの版：{VERSION_LABEL}</div>
         <div className="note">保存先：{backend.mode === "supabase" ? "Supabase（ログインした本人だけが読み書きできます）" : "この端末のブラウザの中（お試しモード）"}</div>
-        <div className="note">明細 {data.entries.length}件・残高の報告 {data.balances.length}件・定期 {data.recurring.length}件</div>
+        <div className="note">クレカ明細 {data.cards.length}件・口座明細 {data.accounts.length}件・残高の記録 {data.balances.length}件・定期 {data.recurring.length}件・目標 {data.goals.length}件</div>
         <div className="btns"><button className="btn ghost" onClick={download}>すべてのデータを書き出す（JSON）</button></div>
         <Field label="移行用の JSON を取り込む" hint="移行用に作ったファイル（format: gholdengo-import-v1）。2回取り込んでも二重にはなりません">
           <input type="file" accept="application/json,.json" onChange={(e) => importFile(e.target.files?.[0])} />

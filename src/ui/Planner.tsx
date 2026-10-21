@@ -9,13 +9,14 @@ type Mode = "monthly" | "by";
 export function Planner({ store, data, today }: { store: Store; data: AppData; today: string }) {
   const s = data.settings;
   const from = ymOf(today);
-  const debt = data.debts.reduce((a, x) => a + x.balance, 0);
+  const debt = data.goals.filter((g) => g.active && g.kind === "repay").reduce((a, x) => a + x.balance, 0);
+  const save = data.goals.find((g) => g.active && g.kind === "save");
   const [mode, setMode] = useState<Mode>("monthly");
-  const [monthly, setMonthly] = useState<number | "">(s.savingMonthly || 20000);
+  const [monthly, setMonthly] = useState<number | "">(save?.monthly || 20000);
   const [by, setBy] = useState(addMonths(from, 12));
   const [useBonus, setUseBonus] = useState(true);
   const [saved, setSaved] = useState<number | "">(0);
-  const [target, setTarget] = useState<number | "">(s.reserveGoal || s.salaryEstimate || 0);
+  const [target, setTarget] = useState<number | "">(save?.target || s.salaryEstimate || 0);
 
   const base = { from, useBonus, saved: Number(saved) || 0, target: Number(target) || 0 };
   const need = useMemo(() => (mode === "by" ? monthlyFor(data, base, by) : null), [mode, by, useBonus, saved, target, data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -28,9 +29,10 @@ export function Planner({ store, data, today }: { store: Store; data: AppData; t
   const apply = async () => {
     if (!confirm(`${ymLabel(from)}〜${ymLabel(last)}の目標用マイナスを、この計画の額にしますか？（手で直した月も上書きします）`)) return;
     const ok = await store.run(async () => {
-      for (const x of rows) await actions.saveBase(x.ym, "goal", x.put);
-      // 計画のあとの月も、同じ額を毎月の貯金として続ける
-      await actions.saveSettings({ ...s, savingMonthly: m, savingStart: addMonths(last, 1), reserveGoal: Number(target) || s.reserveGoal });
+      for (const x of rows) await actions.saveGoalMinus(x.ym, x.put);
+      // 計画のあとの月も、同じ額を毎月の積立として続ける（目標マスタの積立の目標）
+      const g = { kind: "save" as const, name: save?.name || "給料1か月分の積立", monthly: m, start_month: addMonths(last, 1), target: Number(target) || save?.target || 0, balance: rows[rows.length - 1]?.saved ?? 0, active: true };
+      await actions.saveGoal(data, save ? { ...g, id: save.id } : g, today);
     });
     if (ok) toast("計画を目標用マイナスに入れました");
   };
@@ -40,7 +42,7 @@ export function Planner({ store, data, today }: { store: Store; data: AppData; t
       <section>
         <h2>目標</h2>
         <div className="panel">
-          <div className="legend" style={{ justifyContent: "space-between" }}><span>① リボ・分割を 0 にする（予定のものも含む）</span><b className="num">いま {yen(debt)}円</b></div>
+          <div className="legend" style={{ justifyContent: "space-between" }}><span>① リボ・分割を 0 にする（目標マスタの返済の目標）</span><b className="num">いま {yen(debt)}円</b></div>
           <Field label="② 給料日前日に残したい額（手取り1か月分など）"><NumInput value={target} onChange={setTarget} /></Field>
           <Field label="今の貯金（目標に数える、もう残してあるお金）"><NumInput value={saved} onChange={setSaved} /></Field>
           <label className="check"><input type="checkbox" checked={useBonus} onChange={(e) => setUseBonus(e.target.checked)} />予定に入っている賞与を、全額リボの返済と貯金に回す</label>
@@ -80,7 +82,7 @@ export function Planner({ store, data, today }: { store: Store; data: AppData; t
           </div>
           <div className="note">自由に使えるお金は、給与 ＋ 追加予算 − 固定費の見込み − 回す額 です。給与の予定がまだない先の月は、設定の給与の見込み額で数えています。</div>
           <div className="btns"><button className="btn" onClick={apply}>この計画にする</button></div>
-          <div className="note">押すと、{ymLabel(from)}〜{ymLabel(last)}の各月の目標用マイナスが、表の「回す」の額になります。あとから設定の予算で月ごとに直せます。</div>
+          <div className="note">押すと、{ymLabel(from)}〜{ymLabel(last)}の各月の目標用マイナスが、表の「回す」の額になります。そのあとは目標マスタの積立の目標として毎月続けます。あとから設定で直せます。</div>
         </div>
       </section>
     </>
