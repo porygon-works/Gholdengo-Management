@@ -83,7 +83,7 @@ function readLocal(): Raw {
 }
 function writeLocal(d: Raw) { try { localStorage.setItem(LS, JSON.stringify(d)); } catch { /* 保存できない環境 */ } }
 
-const ENTRY_DEFAULTS = { shop: "", item: "", memo: "", tatekae: 0, merged_into: null, recurring_id: null, not_dup: [], locked: false, source_ref: null };
+const ENTRY_DEFAULTS = { card: null, shop: "", item: "", memo: "", tatekae: 0, merged_into: null, recurring_id: null, not_dup: [], locked: false, source_ref: null };
 
 function localBackend(): Backend {
   return {

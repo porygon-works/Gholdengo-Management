@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  assetAt, budgetsFor, cardPayDate, cashLimit, dipBefore, goalPlan, monthBase, monthlyFor, planGoals, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
+  assetAt, budgetsFor, cardPayDate, debitsFor, nextMonthSpend, cashLimit, dipBefore, goalPlan, monthBase, monthlyFor, planGoals, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
   isBusinessDay, missingRecurring, normalizeShop, projection, recurringDate, ruleFor, shiftBusiness, type Data, type Entry, type Recurring,
 } from "./index";
 
@@ -8,7 +8,7 @@ const S = DEFAULT_SETTINGS;
 let n = 0;
 const E = (p: Partial<Entry>): Entry => ({
   id: p.id ?? `e${++n}`, kind: "expense", status: "confirmed", date: "2026-10-10", amount: 1000, method: "card", category: "食料品",
-  shop: "", item: "", memo: "", tatekae: 0, source: "manual", source_ref: null, merged_into: null, recurring_id: null, not_dup: [], locked: false, ...p,
+  shop: "", item: "", memo: "", tatekae: 0, source: "manual", source_ref: null, merged_into: null, recurring_id: null, not_dup: [], locked: false, card: null, ...p,
 });
 const D = (p: Partial<Data>): Data => ({ entries: [], balances: [], cardBills: [], recurring: [], budgets: [], rules: [], debts: [], settings: S, ...p });
 
@@ -46,7 +46,7 @@ describe("資産から減る日", () => {
 });
 
 describe("定期のお金", () => {
-  const salary: Recurring = { id: "r1", name: "給与", kind: "income", category: null, amount: 250000, day: 15, shift: "next", method: "bank", shop: "", start_month: null, end_month: null, active: true };
+  const salary: Recurring = { id: "r1", name: "給与", kind: "income", category: null, amount: 250000, day: 15, shift: "next", method: "bank", card: null, shop: "", start_month: null, end_month: null, active: true };
   it("土日祝をずらして予定を作る", () => {
     expect(recurringDate(salary, "2026-11")).toBe("2026-11-16");
     const out = missingRecurring([salary], [], ["2026-11", "2026-12"]);
@@ -182,7 +182,7 @@ describe("口座の見通し（足りなくなる日の警告に使う）", () =
   it("カード請求額が分かっていれば、その日のクレカ明細の代わりに請求額で数える", () => {
     const d = D({
       balances: [base],
-      cardBills: [{ id: "c", pay_date: "2026-10-26", amount: 123456 }],
+      cardBills: [{ id: "c", card: "smbc", pay_date: "2026-10-26", amount: 123456 }],
       entries: [E({ method: "card", amount: 200000, date: "2026-09-20" })],
     });
     const p = projection(d, today)!;
@@ -222,7 +222,7 @@ describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用�
     expect(b.T).toBe(260000 + 5000 - 75000 - 20000);
   });
   it("固定費の費目に予算がなければ、定期のお金のその月の額を初めの値にする", () => {
-    const rec = (p: Partial<Recurring>): Recurring => ({ id: "r", name: "奨学金", kind: "expense", category: "奨学金", amount: 30000, day: 27, shift: "next", method: "bank", shop: "", start_month: null, end_month: null, active: true, ...p });
+    const rec = (p: Partial<Recurring>): Recurring => ({ id: "r", name: "奨学金", kind: "expense", category: "奨学金", amount: 30000, day: 27, shift: "next", method: "bank", card: null, shop: "", start_month: null, end_month: null, active: true, ...p });
     const d = D({ recurring: [rec({}), rec({ id: "r2", name: "家賃", category: "家賃", amount: 70000, start_month: "2027-01" })] });
     expect(budgetsFor(d, "2026-10").get("奨学金")).toBe(30000);
     expect(budgetsFor(d, "2026-10").has("家賃")).toBe(false);
@@ -372,5 +372,48 @@ describe("お店→費目のルール", () => {
   it("中身の分からないお店は覚えない", () => {
     expect(ruleFor("Mastercard加盟店")).toBeNull();
     expect(ruleFor("サンプルストア／ｉＤ")).toBe("サンプルストア");
+  });
+});
+
+describe("カード2枚と引き落とし", () => {
+  it("カードごとの締め日・引落日で、資産から減る日を出す", () => {
+    expect(cashDate(E({ method: "card", card: "saison", date: "2026-10-31" }), S)).toBe("2026-11-04");
+    expect(cardPayDate("2026-12", S, "saison")).toBe("2027-01-04");
+    expect(cashDate(E({ method: "card", card: null, date: "2026-10-31" }), S)).toBe("2026-11-26");
+    const later = { ...S, cards: [S.cards[0], { ...S.cards[1], payMonths: 2 }] };
+    expect(cashDate(E({ method: "card", card: "saison", date: "2026-10-31" }), later)).toBe("2026-12-04");
+  });
+  it("引き落とし枠：口座から直接・カードごとの見込み・請求額があれば確定", () => {
+    const d = D({
+      entries: [
+        E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-11-27", status: "plan" }),
+        E({ method: "card", amount: 5000, date: "2026-10-05" }),
+        E({ method: "card", amount: 3000, date: "2026-10-31" }),
+        E({ method: "card", amount: 9000, date: "2026-11-01" }),
+        E({ method: "card", card: "saison", category: "家賃", amount: 70000, date: "2026-10-27" }),
+        E({ method: "card", card: "saison", category: "返済", amount: 10000, date: "2026-11-04", status: "plan" }),
+        E({ method: "cash", amount: 800, date: "2026-11-02" }),
+      ],
+    });
+    const x = debitsFor(d, "2026-11");
+    expect(x.directSum).toBe(30000);
+    const [smbc, saison] = x.cards;
+    expect([smbc.date, smbc.estimate, smbc.bill]).toEqual(["2026-11-26", 8000, null]);
+    expect([saison.date, saison.estimate, saison.repays.length]).toEqual(["2026-11-04", 80000, 1]);
+    expect(x.total).toBe(30000 + 8000 + 80000);
+    const y = debitsFor({ ...d, cardBills: [{ id: "b", card: "smbc", pay_date: "2026-11-26", amount: 8500 }] }, "2026-11");
+    expect([y.cards[0].bill, y.cards[0].amount, y.total]).toEqual([8500, 8500, 30000 + 8500 + 80000]);
+  });
+  it("来月の支払い予定：固定費の見込み＋変動費（来月の予算）＋リボ・分割", () => {
+    const d = D({
+      budgets: [{ month: "2026-11", category: "家賃", amount: 70000 }],
+      entries: [
+        E({ kind: "income", method: "bank", category: "給与", amount: 250000, date: "2026-11-16", status: "plan" }),
+        E({ method: "card", card: "saison", category: "返済", amount: 10000, date: "2026-11-04", status: "plan" }),
+      ],
+    });
+    const n = nextMonthSpend(d, "2026-11");
+    expect([n.fixed, n.repay, n.variable]).toEqual([70000, 10000, 250000 - 70000 - 10000]);
+    expect(n.total).toBe(250000);
   });
 });

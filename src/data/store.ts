@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, BASE_KEYS, categorize, computeMonth, DEFAULT_SETTINGS, FIXED_DEBIT, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf, type BaseKey,
+  addMonths, BASE_KEYS, REPAY, categorize, computeMonth, DEFAULT_SETTINGS, FIXED_DEBIT, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf, type BaseKey,
   type Balance, type Budget, type CardBill, type Data, type Debt, type Entry, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, type Raw, type Row } from "./backend";
@@ -19,13 +19,16 @@ function toData(raw: Raw): AppData {
     method: r.method as Entry["method"], category: (r.category as string) || null, shop: str(r.shop), item: str(r.item), memo: str(r.memo),
     tatekae: num(r.tatekae), source: r.source as Entry["source"], source_ref: (r.source_ref as string) || null,
     merged_into: (r.merged_into as string) || null, recurring_id: (r.recurring_id as string) || null,
-    not_dup: Array.isArray(r.not_dup) ? (r.not_dup as string[]) : [], locked: !!r.locked,
+    not_dup: Array.isArray(r.not_dup) ? (r.not_dup as string[]) : [], locked: !!r.locked, card: (r.card as string) || null,
   }));
   const balances: Balance[] = raw.balances.map((r) => ({ id: str(r.id), date: day(r.date), bank: num(r.bank), cash: num(r.cash), paypay: num(r.paypay), memo: str(r.memo) }));
-  const cardBills: CardBill[] = raw.card_bills.map((r) => ({ id: str(r.id), pay_date: day(r.pay_date), amount: num(r.amount) }));
+  const saved = (raw.settings[0]?.data as Partial<Settings>) || {};
+  const settings: Settings = { ...DEFAULT_SETTINGS, ...saved };
+  if (!settings.cards?.length) settings.cards = DEFAULT_SETTINGS.cards;
+  const cardBills: CardBill[] = raw.card_bills.map((r) => ({ id: str(r.id), card: (r.card as string) || settings.cards[0].id, pay_date: day(r.pay_date), amount: num(r.amount) }));
   const recurring: Recurring[] = raw.recurring.map((r) => ({
     id: str(r.id), name: str(r.name), kind: r.kind as Recurring["kind"], category: (r.category as string) || null, amount: num(r.amount),
-    day: num(r.day) || 1, shift: (r.shift as Recurring["shift"]) || "next", method: (r.method as Recurring["method"]) || "bank", shop: str(r.shop),
+    day: num(r.day) || 1, shift: (r.shift as Recurring["shift"]) || "next", method: (r.method as Recurring["method"]) || "bank", card: (r.card as string) || null, shop: str(r.shop),
     start_month: (r.start_month as string) || null, end_month: (r.end_month as string) || null, active: r.active !== false,
   }));
   const budgets: Budget[] = raw.budgets.map((r) => ({ month: str(r.month), category: str(r.category), amount: num(r.amount) }));
@@ -34,8 +37,6 @@ function toData(raw: Raw): AppData {
     id: str(r.id), name: str(r.name), balance: num(r.balance), as_of: r.as_of ? day(r.as_of) : null, rate: str(r.rate),
     min_payment: num(r.min_payment), note: str(r.note), planned: !!r.planned,
   }));
-  const saved = (raw.settings[0]?.data as Partial<Settings>) || {};
-  const settings: Settings = { ...DEFAULT_SETTINGS, ...saved };
   const review: ReviewRow[] = raw.review.map((r) => ({ id: str(r.id), kind: str(r.kind), title: str(r.title), body: str(r.body), resolved: !!r.resolved, created_at: str(r.created_at) }));
   return { entries, balances, cardBills, recurring, budgets, rules, debts, settings, review };
 }
@@ -78,8 +79,28 @@ async function migrate(raw: Raw, d: AppData): Promise<boolean> {
   return true;
 }
 
+/**
+ * 版2 → 版3：クレカを複数持てるようにした（settings.cards）。
+ * 前の版のカードの締め日・引落日は1枚目のカードに移す。
+ * 名前に「セゾン」とある口座払いの返済は、セゾンの引き落としと一緒に出るので、金種をセゾンのカードにする。
+ */
+async function migrate3(raw: Raw, d: AppData): Promise<boolean> {
+  const saved = raw.settings[0]?.data as (Partial<Settings> & { cardClosingDay?: number; cardPayDay?: number }) | undefined;
+  if (!saved || (saved.version ?? 1) !== 2) return false;
+  const { cardClosingDay, cardPayDay, ...rest } = saved;
+  const cards = DEFAULT_SETTINGS.cards.map((c, i) => (i === 0 ? { ...c, closingDay: cardClosingDay ?? c.closingDay, payDay: cardPayDay ?? c.payDay } : c));
+  const saison = cards.find((c) => c.id === "saison");
+  if (saison) {
+    for (const e of d.entries) if (e.category === REPAY && e.method === "bank" && /セゾン/.test(e.item + e.shop)) await backend.update("entries", e.id, { method: "card", card: saison.id });
+    for (const r of d.recurring) if (r.category === REPAY && r.method === "bank" && /セゾン/.test(r.name)) await backend.update("recurring", r.id, { method: "card", card: saison.id });
+  }
+  await backend.upsertKeyed("settings", [{ data: { ...d.settings, ...rest, cards, version: 3 } }]);
+  return true;
+}
+
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (await migrate(raw, d)) return true;
+  if (await migrate3(raw, d)) return true;
   let wrote = false;
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); wrote = true; }
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }
@@ -163,7 +184,7 @@ export type Store = ReturnType<typeof useStore>;
 
 // ---------- 画面からの操作 ----------
 
-export type NewEntry = Pick<Entry, "kind" | "status" | "date" | "amount" | "method" | "category"> & Partial<Pick<Entry, "shop" | "item" | "memo" | "tatekae">>;
+export type NewEntry = Pick<Entry, "kind" | "status" | "date" | "amount" | "method" | "category"> & Partial<Pick<Entry, "shop" | "item" | "memo" | "tatekae" | "card">>;
 
 export const actions = {
   addEntry: (e: NewEntry) => backend.insert("entries", [{ shop: "", item: "", memo: "", tatekae: 0, ...e, source: "manual", locked: e.status !== "plan" }]),
@@ -207,6 +228,12 @@ export const actions = {
 
   /** 予定を確定にする（金額と日付を実際の値にする） */
   confirmPlan: (id: string, amount: number, date: string) => backend.update("entries", id, { status: "confirmed", amount, date, source: "manual", locked: true }),
+
+  /** カードの請求額（確定）を入れる。null なら消して見込みに戻す */
+  saveBill: async (card: string, pay_date: string, amount: number | null, id?: string) => {
+    if (amount == null) { if (id) await backend.remove("card_bills", id); return; }
+    await backend.insert("card_bills", [{ card, pay_date, amount, source_ref: `manual:${card}:${pay_date}` }], { onConflict: "pay_date", merge: true });
+  },
 
   addBalance: (b: Omit<Balance, "id">) => backend.insert("balances", [b as unknown as Row]),
   deleteBalance: (id: string) => backend.remove("balances", id),

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Entry, Method, Status } from "../engine";
+import { cardOf, type Entry, type Method, type Settings, type Status } from "../engine";
 
 export const yen = (n: number) => (Math.round(n) || 0).toLocaleString("ja-JP");
 export const signed = (n: number) => (n < 0 ? "−" + yen(-n) : yen(n));
@@ -9,6 +9,12 @@ export const ymLabel = (ym: string) => `${ym.slice(0, 4)}年${+ym.slice(5)}月`;
 // PayPay と交通系は、チャージした額をその日の支出として数える（チャージしたあと何に使ったかは管理しない）
 export const METHOD_LABEL: Record<Method, string> = { card: "クレカ", cash: "現金", paypay: "PayPayチャージ", ic: "交通系チャージ", point: "ポイント", bank: "口座", revo: "リボ" };
 export const QUICK_METHODS: Method[] = ["card", "cash", "paypay", "ic"];
+
+/** 金種の選択肢。クレカはカードごとに分けて "card:smbc" のように書く */
+export const payKey = (s: Settings, method: Method, card: string | null) => (method === "card" ? `card:${cardOf(s, card).id}` : method);
+export const fromPayKey = (k: string): { method: Method; card: string | null } => (k.startsWith("card:") ? { method: "card", card: k.slice(5) } : { method: k as Method, card: null });
+export const payKeys = (s: Settings, ms: Method[]) => ms.flatMap((m) => (m === "card" ? s.cards.map((c) => `card:${c.id}`) : [m]));
+export const payLabels = (s: Settings): Record<string, string> => ({ ...METHOD_LABEL, ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, c.name])) });
 export const ALL_METHODS: Method[] = ["card", "cash", "paypay", "ic", "bank", "revo"];
 export const STATUS_LABEL: Record<Status, string> = { plan: "予定", flash: "速報", confirmed: "確定" };
 export const SOURCE_LABEL: Record<Entry["source"], string> = { manual: "手入力", card_flash: "カード速報", card_statement: "カード明細", recurring: "定期", migration: "移行" };

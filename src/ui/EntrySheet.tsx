@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { addDays, budgetCats, INCOME_EXTRA, INCOME_SALARY, isSalary, OUTSIDE, REPAY, todayJST, type Entry, type Kind, type Method, type Status } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
-import { ALL_METHODS, Field, md, METHOD_LABEL, NumInput, Select, Sheet, SOURCE_LABEL, STATUS_LABEL, StatusChip, toast, yen, entryTitle } from "./common";
+import { ALL_METHODS, Field, fromPayKey, payKey, payKeys, payLabels, md, METHOD_LABEL, NumInput, Select, Sheet, SOURCE_LABEL, STATUS_LABEL, StatusChip, toast, yen, entryTitle } from "./common";
 
 const UNC = "未分類";
 
@@ -24,7 +24,7 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
   const [status, setStatus] = useState<Status>(base.status);
   const [date, setDate] = useState(base.date);
   const [amount, setAmount] = useState<number | "">(entry || base.amount ? base.amount : "");
-  const [method, setMethod] = useState<Method>(base.method);
+  const [pay, setPay] = useState(payKey(data.settings, base.method, base.card ?? null));
   const [cat, setCat] = useState(base.category ?? UNC);
   // 収入の扱い：給与（予算の元）／追加予算／予算に入れない
   const [incomeUse, setIncomeUse] = useState<string>(base.kind === "income" && entry && isSalary(entry) ? INCOME_SALARY : base.category === INCOME_EXTRA ? INCOME_EXTRA : "");
@@ -46,7 +46,8 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
   const save = async () => {
     if (!amount || !date) { toast("日付と金額を入れてください"); return; }
     const category = kind === "expense" ? (cat !== UNC ? cat : null) : incomeUse || null;
-    const v = { kind, status, date, amount, method, category, shop, item, memo, tatekae: tatekae || 0 };
+    const { method, card } = fromPayKey(pay);
+    const v = { kind, status, date, amount, method, card, category, shop, item, memo, tatekae: tatekae || 0 };
     const ok = await store.run(async () => {
       await (entry ? actions.updateEntry(data, entry.id, v) : actions.addEntry(v));
       if (kind === "expense" && addedTatekae > 0 && refund) {
@@ -89,7 +90,7 @@ export function EntrySheet({ store, data, entry, preset, onClose }: Props) {
       {kind === "expense" && (
         <div className="grid2">
           <Field label="費目"><Select value={cat} options={catOptions(data, kind)} onChange={setCat} /></Field>
-          <Field label="金種"><Select value={method} options={ALL_METHODS} onChange={setMethod} labels={METHOD_LABEL} /></Field>
+          <Field label="金種"><Select value={pay} options={payKeys(data.settings, ALL_METHODS)} onChange={setPay} labels={payLabels(data.settings)} /></Field>
         </div>
       )}
       {kind === "income" && (

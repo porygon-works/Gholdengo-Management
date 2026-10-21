@@ -1,20 +1,24 @@
 import { addMonths, dayOf, shiftBusiness, ymOf } from "./dates";
-import { REPAY, type Entry, type Recurring, type Settings } from "./types";
+import { REPAY, type CardDef, type Entry, type Recurring, type Settings } from "./types";
 
-/** 予算月 ym にクレカで使った分の引落日 */
-export function cardPayDate(ym: string, s: Settings): string {
-  return shiftBusiness(dayOf(addMonths(ym, 1), s.cardPayDay), "next");
+/** カードの設定。id がなければ（または見つからなければ）1枚目 */
+export const cardOf = (s: Settings, id?: string | null): CardDef => s.cards.find((c) => c.id === id) ?? s.cards[0];
+
+/** 締め月 ym にそのカードで使った分の引落日 */
+export function cardPayDate(ym: string, s: Settings, card?: string | null): string {
+  const c = cardOf(s, card);
+  return shiftBusiness(dayOf(addMonths(ym, c.payMonths), c.payDay), "next");
 }
 
 /** 使った日 d のクレカ利用が属する締め月 */
-export function closingMonth(d: string, s: Settings): string {
+export function closingMonth(d: string, s: Settings, card?: string | null): string {
   const ym = ymOf(d);
-  return +d.slice(8) > s.cardClosingDay ? addMonths(ym, 1) : ym;
+  return +d.slice(8) > cardOf(s, card).closingDay ? addMonths(ym, 1) : ym;
 }
 
 /**
  * 資産から減る（または増える）日。null は資産が動かないもの。
- * - クレカ：締め月の翌月の引落日。ただし「返済」はその日に請求される額なので、使った日そのもの
+ * - クレカ：そのカードの締め月の引落日。ただし「返済」はその日に請求される額なので、使った日そのもの
  * - 現金・PayPay・交通系・口座：その日
  * - ポイント・リボで買った物：資産は動かない（リボは返済の明細で数える）
  */
@@ -26,7 +30,7 @@ export function cashDate(e: Entry, s: Settings): string | null {
     case "revo":
       return null;
     case "card":
-      return e.category === REPAY ? e.date : cardPayDate(closingMonth(e.date, s), s);
+      return e.category === REPAY ? e.date : cardPayDate(closingMonth(e.date, s, e.card), s, e.card);
     default:
       return e.date;
   }
@@ -54,7 +58,7 @@ export function missingRecurring(recurring: Recurring[], entries: Entry[], month
       const ref = recurringRef(r, ym);
       if (have.has(ref)) continue;
       out.push({
-        kind: r.kind, status: "plan", date: recurringDate(r, ym), amount: r.amount, method: r.method,
+        kind: r.kind, status: "plan", date: recurringDate(r, ym), amount: r.amount, method: r.method, card: r.method === "card" ? r.card : null,
         category: r.category, shop: r.shop || "", item: r.name, memo: "", tatekae: 0,
         source: "recurring", source_ref: ref, merged_into: null, recurring_id: r.id, not_dup: [], locked: false,
       });
