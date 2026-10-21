@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
+  addMonths, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type Goal, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
@@ -120,9 +120,28 @@ async function copyV2(raw: Raw, d: AppData): Promise<boolean> {
  * 5. クレカ明細の重複を自動でまとめる
  * 6. 今月の費目予算がまだなければ、前の月から引き継いだ値を保存する
  */
+/**
+ * 版5 → 版6：版5でクレカ明細の分割（返済）を引落日の日付にしたのを、締め期間の最後の日に戻す
+ * （分割（返済）も利用日で請求に入れる決め方に戻したため）
+ */
+async function migrate6(raw: Raw, d: AppData): Promise<boolean> {
+  const saved = raw.settings[0]?.data as Partial<Settings> | undefined;
+  if (!saved || saved.version !== 5) return false;
+  const s = d.settings;
+  for (const e of d.cards) {
+    if (e.group !== "installment") continue;
+    const closing = closingFor(ymOf(e.date), s, e.card);
+    if (e.date !== cardPayDate(closing, s, e.card)) continue;
+    await backend.update("card_entries", e.id, { date: closingEnd(closing, s, e.card) });
+  }
+  await backend.upsertKeyed("settings", [{ data: { ...s, version: 6 } }]);
+  return true;
+}
+
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); return true; }
   if (await migrate4(raw, d)) return true;
+  if (await migrate6(raw, d)) return true;
   if (await copyV2(raw, d)) return true;
   let wrote = false;
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }
