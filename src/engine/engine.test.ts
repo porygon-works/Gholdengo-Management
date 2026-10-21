@@ -205,21 +205,28 @@ describe("口座の見通し（足りなくなる日の警告に使う）", () =
 describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用マイナス）", () => {
   const today = "2026-10-20";
   const salary = E({ kind: "income", status: "confirmed", method: "bank", amount: 260000, date: "2026-10-15", category: "給与" });
-  const rent = E({ kind: "expense", method: "bank", category: "固定引落", amount: 70000, date: "2026-10-04" });
-  const scholarship = E({ kind: "expense", status: "plan", method: "bank", category: "固定引落", amount: 30000, date: "2026-10-27" });
   const revo = E({ kind: "expense", status: "plan", method: "card", category: "返済", amount: 20000, date: "2026-10-26" });
-  it("予算の元を明細と予定から出す。賞与や売却代金・立替の返金は、追加予算にしたときだけ入る", () => {
+  const fixedBudgets = [{ month: "2026-10", category: "家賃", amount: 70000 }, { month: "2026-10", category: "通信", amount: 5000 }];
+  it("予算の元：固定費は固定費の費目の予算の合計。賞与や売却代金・立替の返金は、追加予算にしたときだけ入る", () => {
     const d = D({
+      budgets: fixedBudgets,
       entries: [
-        salary, rent, scholarship, revo,
+        salary, revo,
         E({ kind: "income", status: "plan", method: "bank", amount: 5000, date: "2026-10-20", category: "追加予算", item: "イベチケ" }),
         E({ kind: "income", status: "plan", method: "cash", amount: 16000, date: "2026-10-25", category: null, item: "立替の返金" }),
         E({ kind: "income", status: "confirmed", method: "bank", amount: 40000, date: "2026-10-20", category: null, item: "売却代金" }),
       ],
     });
     const b = monthBase(d, "2026-10");
-    expect([b.salary, b.extra, b.fixed, b.goal]).toEqual([260000, 5000, 100000, 20000]);
-    expect(b.T).toBe(260000 + 5000 - 100000 - 20000);
+    expect([b.salary, b.extra, b.fixed, b.goal]).toEqual([260000, 5000, 75000, 20000]);
+    expect(b.T).toBe(260000 + 5000 - 75000 - 20000);
+  });
+  it("固定費の費目に予算がなければ、定期のお金のその月の額を初めの値にする", () => {
+    const rec = (p: Partial<Recurring>): Recurring => ({ id: "r", name: "奨学金", kind: "expense", category: "奨学金", amount: 30000, day: 27, shift: "next", method: "bank", shop: "", start_month: null, end_month: null, active: true, ...p });
+    const d = D({ recurring: [rec({}), rec({ id: "r2", name: "家賃", category: "家賃", amount: 70000, start_month: "2027-01" })] });
+    expect(budgetsFor(d, "2026-10").get("奨学金")).toBe(30000);
+    expect(budgetsFor(d, "2026-10").has("家賃")).toBe(false);
+    expect(monthBase(d, "2027-01").fixed).toBe(100000);
   });
   it("定期のお金から作った収入は、扱いを決めていなければ給与として数える", () => {
     const d = D({ entries: [E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-11-16", category: null, recurring_id: "r1" })] });
@@ -236,13 +243,23 @@ describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用�
     expect(m.manual.goal).toBe(true);
     expect(m.auto.goal).toBe(20000);
   });
-  it("自由に使える残り ＝ 予算 − 使った − 予定。返済・固定引落は自由に使えるお金から引かない", () => {
-    const d = D({ entries: [salary, rent, revo, E({ amount: 3000, category: "外食", date: "2026-10-18" }), E({ status: "plan", amount: 5000, category: "外食", date: "2026-10-25" })] });
+  it("自由に使える残り ＝ 予算 − 変動費で使った − 変動費の予定。固定費の支払いと返済は引かない", () => {
+    const d = D({
+      budgets: fixedBudgets,
+      entries: [salary, revo, E({ method: "bank", amount: 70000, category: "家賃", date: "2026-10-04" }), E({ amount: 3000, category: "外食", date: "2026-10-18" }), E({ status: "plan", amount: 5000, category: "外食", date: "2026-10-25" })],
+    });
     const v = computeMonth(d, "2026-10", today);
-    expect(v.T).toBe(260000 - 70000 - 20000);
-    expect([v.U, v.P]).toEqual([3000, 5000]);
+    expect(v.T).toBe(260000 - 75000 - 20000);
+    expect([v.U, v.P, v.fixedOver]).toEqual([3000, 5000, 0]);
     expect(v.R).toBe(v.T - 8000);
-    expect(v.outside.map((e) => e.category).sort()).toEqual(["固定引落", "返済"]);
+    expect(v.cats.find((c) => c.cat === "家賃")!.used).toBe(70000);
+    expect(v.outside.map((e) => e.category)).toEqual(["返済"]);
+  });
+  it("固定費が予算（見込み）をこえた分は、自由に使える残りから引く", () => {
+    const d = D({ budgets: fixedBudgets, entries: [salary, E({ amount: 6500, category: "通信" })] });
+    const v = computeMonth(d, "2026-10", today);
+    expect(v.fixedOver).toBe(1500);
+    expect(v.R).toBe(v.T - 1500);
   });
   it("カードで使っても現金で使っても、残りは同じだけ減り、予算は変わらない", () => {
     const a = computeMonth(D({ entries: [salary] }), "2026-10", today);
@@ -250,14 +267,14 @@ describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用�
     expect(a.R - b.R).toBe(4000);
     expect(b.T).toBe(a.T);
   });
-  it("予備は予算から他の費目予算を引いた残り。未分類は予備に数える", () => {
+  it("予備は予算から他の変動費の予算を引いた残り。未分類は予備に数える", () => {
     const d = D({
-      budgets: [{ month: "2026-10", category: "食料品", amount: 30000 }, { month: "2026-10", category: "外食", amount: 20000 }],
+      budgets: [...fixedBudgets, { month: "2026-10", category: "食料品", amount: 30000 }, { month: "2026-10", category: "外食", amount: 20000 }],
       entries: [salary, E({ amount: 3000, category: null, source: "card_flash", status: "flash" })],
     });
     const v = computeMonth(d, "2026-10", today);
     const reserve = v.cats.find((c) => c.cat === "予備")!;
-    expect(reserve.budget).toBe(260000 - 50000);
+    expect(reserve.budget).toBe(260000 - 75000 - 50000);
     expect(reserve.used).toBe(3000);
     expect(v.unclassified).toHaveLength(1);
   });

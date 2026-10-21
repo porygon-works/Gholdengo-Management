@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { addDays, budgetCats, FIXED_DEBIT, INCOME_EXTRA, INCOME_SALARY, isSalary, OUTSIDE, REPAY, todayJST, type Entry, type Kind, type Method, type Status } from "../engine";
+import { addDays, budgetCats, INCOME_EXTRA, INCOME_SALARY, isSalary, OUTSIDE, REPAY, todayJST, type Entry, type Kind, type Method, type Status } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { ALL_METHODS, Field, md, METHOD_LABEL, NumInput, Select, Sheet, SOURCE_LABEL, STATUS_LABEL, StatusChip, toast, yen, entryTitle } from "./common";
 
@@ -7,7 +7,7 @@ const UNC = "未分類";
 
 export function catOptions(d: AppData, kind: Kind) {
   if (kind !== "expense") return [UNC];
-  return [UNC, ...budgetCats(d.settings), REPAY, OUTSIDE, FIXED_DEBIT];
+  return [UNC, ...budgetCats(d.settings), REPAY, OUTSIDE];
 }
 
 interface Props {

@@ -78,7 +78,7 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
           <div className="kpi">
             <div className="lb">{label}</div>
             <div className="v num">{signed(v.T)}<small>円</small></div>
-            <div className="note">使った {yen(v.U)}・予定 {yen(v.P)}</div>
+            <div className="note">変動費で使った {yen(v.U)}・予定 {yen(v.P)}</div>
           </div>
           <div className={`kpi ${v.R < 0 || dip ? "bad" : "main"}`}>
             <div className="lb">自由に使える残り</div>
@@ -90,7 +90,7 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
         <button className="panel" onClick={() => go("settings")} style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit" }}>
           <div className="legend" style={{ justifyContent: "space-between" }}><span>給与</span><b className="num">{yen(b.salary)}</b></div>
           {b.extra !== 0 && <div className="legend" style={{ justifyContent: "space-between" }}><span>＋ 追加予算</span><b className="num">{yen(b.extra)}</b></div>}
-          <div className="legend" style={{ justifyContent: "space-between" }}><span>− 固定費（家賃・奨学金など）</span><b className="num">{yen(b.fixed)}</b></div>
+          <div className="legend" style={{ justifyContent: "space-between" }}><span>− 固定費（家賃・奨学金・通信・サブスクなど）</span><b className="num">{yen(b.fixed)}</b></div>
           <div className="legend" style={{ justifyContent: "space-between" }}><span>− 目標用マイナス（リボの返済・貯金）</span><b className="num">{yen(b.goal)}</b></div>
           <div className="note">タップすると設定で直せます</div>
         </button>
@@ -106,12 +106,12 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
       )}
 
       <section>
-        <h2>費目ごとの予算 <small>タップで明細</small></h2>
+        <h2>変動費 <small>自由に使えるお金から使う・タップで明細</small></h2>
         <div className="panel scroll">
           <table className="tbl">
             <thead><tr><th>費目</th><th>予算</th><th>使った＋予定</th><th>残り</th>{v.when !== "past" && <th>1日あたり</th>}</tr></thead>
             <tbody>
-              {rows.map((r) => (
+              {rows.filter((r) => !r.fixed).map((r) => (
                 <tr key={r.cat} className="tap" onClick={() => go("ledger", r.cat)}>
                   <td>{r.cat}{r.unclassified > 0 && <> <Chip kind="warn">未分類 {yen(r.unclassified)}</Chip></>}</td>
                   <td className="num">{yen(r.budget)}</td>
@@ -124,6 +124,26 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
           </table>
         </div>
         {v.unclassified.length > 0 && <button className="alert" onClick={() => go("ledger")}>未分類の明細が {v.unclassified.length} 件あります（予備で数えています）。タップして費目を入れてください。</button>}
+      </section>
+
+      <section>
+        <h2>固定費 <small>見込み {yen(b.fixed)}円 を給与から引いてある</small></h2>
+        <div className="panel scroll">
+          <table className="tbl">
+            <thead><tr><th>費目</th><th>見込み</th><th>引かれた＋予定</th><th>これから</th></tr></thead>
+            <tbody>
+              {rows.filter((r) => r.fixed).map((r) => (
+                <tr key={r.cat} className="tap" onClick={() => go("ledger", r.cat)}>
+                  <td>{r.cat}</td>
+                  <td className="num">{yen(r.budget)}</td>
+                  <td className="num">{yen(r.used)}{r.planned ? <span className="note">＋{yen(r.planned)}</span> : null}</td>
+                  <td className={`num ${r.rem < 0 ? "neg" : ""}`}>{r.rem < 0 ? `超過 ${yen(-r.rem)}` : yen(Math.max(0, r.budget - r.used))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {v.fixedOver > 0 && <div className="alert">固定費が見込みを {yen(v.fixedOver)}円 こえたので、その分を自由に使える残りから引いています。</div>}
       </section>
 
       {v.when !== "past" && (
