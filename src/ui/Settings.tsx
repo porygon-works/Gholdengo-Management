@@ -105,13 +105,12 @@ function CarryLine({ data, month }: { data: AppData; month: string }) {
   return (
     <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
       <div className="legend" style={{ justifyContent: "space-between" }}>
-        <b style={{ color: "var(--ink)" }}>{c.raw < 0 ? "− 前月からの繰越（使いすぎた分）" : "＋ 前月からの繰越"}</b>
+        <b style={{ color: "var(--ink)" }}>{c.raw < 0 ? "− 前月からの繰越（前の月までの支払いに足りない分）" : "＋ 前月からの繰越"}</b>
         <b className={`num ${c.raw < 0 ? "neg" : ""}`}>{signed(c.raw)}円</b>
       </div>
       <table className="tbl">
         <tbody>
           {row(`${md(c.end)}の口座（見込み）`, c.bank)}
-          {c.wallet !== 0 && row("＋ 財布", c.wallet)}
           {row("− まだ引き落とされていないクレカ（前の月までに使った分）", c.owed)}
           {c.saved !== 0 && row("− 積立にたまった額（口座に置いたまま）", c.saved)}
           {c.safety !== 0 && row("− 安全残高", c.safety)}

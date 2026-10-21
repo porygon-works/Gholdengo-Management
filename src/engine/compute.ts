@@ -368,16 +368,15 @@ export function savedBy(d: Data, ym: string): number {
 
 export interface Carry {
   end: string; // 前の月の最後の日
-  bank: number; // その日の口座（見込み）
-  wallet: number; // その日の財布（見込み）
+  bank: number; // その日の口座（見込み）。財布は数えない
   owed: number; // まだ口座から出ていない、前の月までのクレカ利用
   saved: number; // 積立にたまった額
   safety: number; // 安全残高
-  raw: number; // 繰越 ＝ 口座 ＋ 財布 − クレカ − 積立 − 安全残高
+  raw: number; // 繰越 ＝ 口座 − クレカ − 積立 − 安全残高
 }
 
 /**
- * ym の月の、前月からの繰越（§5.8）。前の月の終わりに口座と財布に残るお金から、もう使い道が決まっているお金を引いた残り。
+ * ym の月の、前月からの繰越（§5.8）。前の月の終わりに口座に残るお金（財布は数えない）から、もう使い道が決まっているお金を引いた残り。
  * 全部「使えるお金」に入れる（マイナスなら引く）。予算にしなかった分は口座に残り、次の月の繰越に入る
  */
 export function carryFor(d: Data, ym: string): Carry | null {
@@ -388,7 +387,7 @@ export function carryFor(d: Data, ym: string): Carry | null {
   const at = balanceAt(d, end);
   if (!at) return null;
   const owed = cardOwedFrom(d, ym), saved = savedBy(d, prev);
-  return { end, bank: at.bank, wallet: at.wallet, owed, saved, safety: s.safety, raw: at.bank + at.wallet - owed - saved - s.safety };
+  return { end, bank: at.bank, owed, saved, safety: s.safety, raw: at.bank - owed - saved - s.safety };
 }
 
 /** 予算に数える出費の1件（クレカ明細か口座明細） */
