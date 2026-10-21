@@ -156,10 +156,12 @@ export function budgetsFor(d: Data, ym: string): Map<string, number> {
   const map = new Map<string, number>();
   if (src) for (const b of catRows) if (b.month === src) map.set(b.category, b.amount);
   map.delete(RESERVE); // 予備はその月に計算する
-  // 予算を入れていない固定費の費目は、定期のお金に入れたその月の額を初めの値にする
+  // 予算を入れていない固定費の費目は、定期のお金に入れたその月の額を初めの値にする。
+  // 定期のお金になければ、その月の明細と予定（1回だけの家賃の予定など）の合計にする
   for (const c of d.settings.fixCats) {
     if (map.has(c)) continue;
-    const sum = d.recurring.filter((r) => r.active && r.kind === "expense" && r.category === c && (!r.start_month || r.start_month <= ym) && (!r.end_month || r.end_month >= ym)).reduce((a, r) => a + r.amount, 0);
+    const sum = d.recurring.filter((r) => r.active && r.kind === "expense" && r.category === c && (!r.start_month || r.start_month <= ym) && (!r.end_month || r.end_month >= ym)).reduce((a, r) => a + r.amount, 0)
+      || d.entries.filter((e) => isLive(e) && e.kind === "expense" && e.category === c && ymOf(e.date) === ym).reduce((a, e) => a + ownCost(e), 0);
     if (sum) map.set(c, sum);
   }
   return map;
