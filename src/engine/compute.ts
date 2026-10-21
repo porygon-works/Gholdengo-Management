@@ -359,3 +359,72 @@ export function passbook(d: Data, today: string, to: string): { base: Balance; r
 }
 
 export const daysAgo = (d: string, today: string) => daysBetween(d, today);
+
+// ---------- 計画をつくる（リボを返し終えて、給料日前日に目標の額を残す） ----------
+
+export interface PlanInput {
+  from: string; // 計画を始める月
+  monthly: number; // 毎月回す額（目標用マイナス）
+  useBonus: boolean; // 賞与を返済・貯金に回すか
+  saved: number; // 今の貯金
+  target: number; // 残したい額（給料日前日の残高の目標）
+  months?: number; // 計算する月数（初めは36か月）
+}
+
+export interface PlanRow {
+  ym: string;
+  put: number; // その月の目標用マイナス（毎月の額。返済の予定のほうが多い月はその額）
+  bonus: number; // その月に回す賞与
+  toDebt: number;
+  toSaving: number;
+  debtLeft: number;
+  saved: number;
+  free: number; // その月の自由に使えるお金（給与 ＋ 追加予算 − 固定費 − 目標用マイナス）
+}
+
+export interface PlanResult {
+  rows: PlanRow[];
+  payoffYm: string | null; // リボ・分割が0になる月
+  reachYm: string | null; // 貯金が目標に届く月
+  minFree: number; // 計画の間で、自由に使えるお金がいちばん少ない月の額
+}
+
+/**
+ * 計画の見通し。毎月「毎月回す額」を目標用マイナスにし、まずリボ・分割（予定のものも含む）の返済に回す。
+ * リボの返済の予定がその額より多い月は、返済の予定の額にする（最低限払う分）。返し終えたら貯金に回す。
+ * 賞与は、その月にそのまま返済・貯金に回す。利息・手数料は入れない。
+ */
+export function planGoals(d: Data, p: PlanInput): PlanResult {
+  const n = p.months ?? 36;
+  let debt = d.debts.reduce((a, x) => a + (x.balance || 0), 0);
+  let saved = p.saved;
+  const rows: PlanRow[] = [];
+  let payoffYm: string | null = debt <= 0 ? p.from : null, reachYm: string | null = saved >= p.target && p.target > 0 ? p.from : null;
+  let minFree = Infinity;
+  for (let k = 0; k < n; k++) {
+    const ym = addMonths(p.from, k);
+    const b = monthBase(d, ym);
+    const put = debt > 0 ? Math.max(p.monthly, b.repay) : p.monthly;
+    const bonus = p.useBonus ? d.entries.filter((e) => isLive(e) && isBonus(e) && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0) : 0;
+    const toDebt = Math.min(put + bonus, debt);
+    debt -= toDebt;
+    saved += put + bonus - toDebt;
+    // 給与の予定がまだない先の月は、設定の給与の見込み額で数える
+    const salary = b.salary || d.settings.salaryEstimate || 0;
+    const free = salary + b.extra - b.fixed - put;
+    minFree = Math.min(minFree, free);
+    rows.push({ ym, put, bonus, toDebt, toSaving: put + bonus - toDebt, debtLeft: debt, saved, free });
+    if (!payoffYm && debt <= 0) payoffYm = ym;
+    if (!reachYm && p.target > 0 && debt <= 0 && saved >= p.target) reachYm = ym;
+  }
+  return { rows, payoffYm, reachYm, minFree: minFree === Infinity ? 0 : minFree };
+}
+
+/** 「◯年◯月までに達成したい」：その月までに貯金が目標に届く、いちばん少ない毎月の額（1,000円単位）。届かなければ null */
+export function monthlyFor(d: Data, p: Omit<PlanInput, "monthly">, by: string, max = 1_000_000): number | null {
+  const ok = (m: number) => { const r = planGoals(d, { ...p, monthly: m }); return !!r.reachYm && r.reachYm <= by; };
+  if (!ok(max)) return null;
+  let lo = 0, hi = max;
+  while (hi - lo > 1000) { const mid = Math.floor((lo + hi) / 2000) * 1000; if (ok(mid)) hi = mid; else lo = mid; }
+  return ok(lo) ? lo : hi;
+}

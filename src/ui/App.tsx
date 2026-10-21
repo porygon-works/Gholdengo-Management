@@ -10,11 +10,13 @@ import { BalanceSheet, Goals, Passbook } from "./Goals";
 import { Ledger } from "./Ledger";
 import { Login } from "./Login";
 import { Plans } from "./Plans";
+import { Planner } from "./Planner";
+import { VERSION_LABEL } from "./version";
 import { reviewCount, ReviewView } from "./Review";
 import { SettingsView } from "./Settings";
 
-type Screen = "home" | "ledger" | "plans" | "settings" | "review" | "goals" | "passbook";
-const TITLES: Record<Screen, string> = { home: "ダッシュボード", ledger: "明細", plans: "予定", settings: "設定", review: "要確認", goals: "目標", passbook: "口座の見通し" };
+type Screen = "home" | "ledger" | "plans" | "settings" | "review" | "goals" | "passbook" | "planner";
+const TITLES: Record<Screen, string> = { home: "ダッシュボード", ledger: "明細", plans: "予定", settings: "設定", review: "要確認", goals: "目標", passbook: "口座の見通し", planner: "計画をつくる" };
 const WITH_MONTH: Screen[] = ["home", "ledger", "plans", "settings"];
 
 const ICONS = {
@@ -89,6 +91,7 @@ function Main() {
             {screen === "review" && <ReviewView store={store} data={data} today={today} onOpen={openEntry} />}
             {screen === "goals" && <Goals data={data} today={today} />}
             {screen === "passbook" && <Passbook data={data} today={today} />}
+            {screen === "planner" && <Planner store={store} data={data} today={today} />}
           </main>
         )}
       </div>
@@ -109,11 +112,13 @@ function Main() {
             <button onClick={() => { setMenu(false); setSheet({ type: "balance" }); }}>残高を入れる</button>
             <button onClick={() => go("review")}>要確認 <span className="num">{reviews || ""}</span></button>
             <button onClick={() => go("passbook")}>口座の見通し（通帳）</button>
+            <button onClick={() => go("planner")}>計画をつくる（リボ返済・貯金）</button>
             <button onClick={() => go("goals")}>目標</button>
             <button onClick={() => go("settings")}>設定</button>
             <button onClick={() => { setMenu(false); store.refresh(); }}>読み直す</button>
             {supabase && <button onClick={() => supabase!.auth.signOut()}>ログアウト</button>}
             <div className="note">{backend.mode === "local" ? "お試しモード：データはこの端末のブラウザの中だけにあります。" : "データは Supabase に保存しています。"}</div>
+            <div className="note">{VERSION_LABEL}</div>
           </nav>
         </>
       )}
