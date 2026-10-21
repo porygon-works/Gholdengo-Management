@@ -287,15 +287,19 @@ export function computeMonth(d: Data, ym: string, today: string): MonthView {
 export interface GoalRow {
   ym: string;
   goal: number; // その月の目標用マイナス
+  bonus: number; // その月の賞与（予算に入れない収入のうち「賞与」）。返済・貯金に回す
   toDebt: number; // そのうち借金の返済に回る分
   toSaving: number; // そのうち貯金に回る分
   debtLeft: number; // その月の終わりの借金の残り（見込み）
   saved: number; // その月の終わりまでにたまる貯金（見込み）
 }
 
+/** 見通しで返済・貯金に回す賞与か（予算に入れない収入のうち、内容に「賞与」とあるもの） */
+export const isBonus = (e: Entry) => e.kind === "income" && !isSalary(e) && e.category !== INCOME_EXTRA && /賞与|ボーナス/.test(e.item);
+
 /**
- * 目標用マイナスの見通し。毎月の目標用マイナスを、まず借金（リボ・分割。予定のものも含む）の返済に回し、
- * 借金がなくなったら貯金に回すと考える。利息・手数料と、賞与での返済は入れていない。
+ * 目標用マイナスの見通し。毎月の目標用マイナスと賞与を、まず借金（リボ・分割。予定のものも含む）の返済に回し、
+ * 借金がなくなったら貯金に回すと考える。利息・手数料は入れていない。
  */
 export function goalPlan(d: Data, fromYm: string, n = 12): { rows: GoalRow[]; payoffYm: string | null; reachYm: string | null } {
   let debt = d.debts.reduce((a, x) => a + (x.balance || 0), 0);
@@ -305,10 +309,11 @@ export function goalPlan(d: Data, fromYm: string, n = 12): { rows: GoalRow[]; pa
   for (let k = 0; k < n; k++) {
     const ym = addMonths(fromYm, k);
     const goal = Math.max(0, monthBase(d, ym).goal);
-    const toDebt = Math.min(goal, debt);
+    const bonus = d.entries.filter((e) => isLive(e) && isBonus(e) && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0);
+    const toDebt = Math.min(goal + bonus, debt);
     debt -= toDebt;
-    saved += goal - toDebt;
-    rows.push({ ym, goal, toDebt, toSaving: goal - toDebt, debtLeft: debt, saved });
+    saved += goal + bonus - toDebt;
+    rows.push({ ym, goal, bonus, toDebt, toSaving: goal + bonus - toDebt, debtLeft: debt, saved });
     if (!payoffYm && debt <= 0) payoffYm = ym;
     if (!reachYm && d.settings.reserveGoal > 0 && saved >= d.settings.reserveGoal) reachYm = ym;
   }

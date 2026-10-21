@@ -105,13 +105,13 @@ function GoalOutlook({ store, data, month }: { store: Store; data: AppData; mont
         {s.reserveGoal > 0 && <div className="legend" style={{ justifyContent: "space-between" }}><span>貯金が目標（{yen(s.reserveGoal)}円）に届く見込み</span><b>{g.reachYm ? ymLabel(g.reachYm) : "12か月では届かない"}</b></div>}
         <div className="scroll">
           <table className="tbl">
-            <thead><tr><th>月</th><th>目標用</th><th>返済へ</th><th>貯金へ</th><th>リボの残り</th><th>貯金</th></tr></thead>
+            <thead><tr><th>月</th><th>目標用</th><th>賞与</th><th>返済へ</th><th>貯金へ</th><th>リボの残り</th><th>貯金</th></tr></thead>
             <tbody>{g.rows.map((r) => (
-              <tr key={r.ym}><td>{r.ym.slice(2, 4)}/{+r.ym.slice(5)}</td><td className="num">{yen(r.goal)}</td><td className="num">{yen(r.toDebt)}</td><td className="num">{yen(r.toSaving)}</td><td className="num">{yen(r.debtLeft)}</td><td className="num">{yen(r.saved)}</td></tr>
+              <tr key={r.ym}><td>{r.ym.slice(2, 4)}/{+r.ym.slice(5)}</td><td className="num">{yen(r.goal)}</td><td className="num">{r.bonus ? yen(r.bonus) : "―"}</td><td className="num">{yen(r.toDebt)}</td><td className="num">{yen(r.toSaving)}</td><td className="num">{yen(r.debtLeft)}</td><td className="num">{yen(r.saved)}</td></tr>
             ))}</tbody>
           </table>
         </div>
-        <div className="note">毎月の目標用マイナスを、まずリボ・分割の返済に回し、なくなったら貯金に回すとして計算しています。利息・手数料と、賞与での返済は入れていません。予定にない月は「毎月の貯金」だけで数えます。</div>
+        <div className="note">毎月の目標用マイナスと、予定に入っている賞与（内容に「賞与」とある、予算に入れない入金）を、まずリボ・分割の返済に回し、なくなったら貯金に回すとして計算しています。利息・手数料は入れていません。予定にない月は「毎月の貯金」だけで数えます。</div>
         <div className="grid2">
           <Field label="毎月の貯金（目標用マイナスの初期値に入る）"><NumInput value={saving} onChange={setSaving} /></Field>
           <Field label="貯金を始める月"><input type="month" value={start} onChange={(e) => setStart(e.target.value)} /></Field>

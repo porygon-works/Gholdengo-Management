@@ -310,6 +310,16 @@ describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用�
     expect(g.payoffYm).toBe("2026-11");
     expect(g.reachYm).toBe("2026-12");
   });
+  it("目標用マイナスの見通し：賞与もその月に借金の返済に回し、余りは貯金に回す", () => {
+    const d = D({
+      settings: { ...S, savingMonthly: 0, savingStart: null },
+      debts: [{ id: "d", name: "リボ", balance: 100000, as_of: null, rate: "", min_payment: 0, note: "", planned: false }],
+      entries: [E({ kind: "income", status: "plan", method: "bank", amount: 300000, date: "2026-12-15", category: null, item: "賞与（12月）" })],
+    });
+    const g = goalPlan(d, "2026-11", 3);
+    expect(g.rows.map((r) => [r.bonus, r.toDebt, r.toSaving, r.debtLeft])).toEqual([[0, 0, 0, 100000], [300000, 100000, 200000, 0], [0, 0, 0, 0]]);
+    expect(g.payoffYm).toBe("2026-12");
+  });
 });
 
 describe("お店→費目のルール", () => {
