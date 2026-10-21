@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
+  addMonths, applyLabels, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type Goal, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
@@ -25,6 +25,7 @@ function settingsOf(raw: Raw): Settings {
 
 function toData(raw: Raw): AppData {
   const settings = settingsOf(raw);
+  applyLabels(settings);
   const accounts: AccountEntry[] = raw.account_entries.map((r) => ({
     id: str(r.id), account: r.account === "wallet" ? "wallet" : "bank", direction: r.direction === "in" ? "in" : "out", status: r.status === "plan" ? "plan" : "confirmed",
     group: (r.group as AccountEntry["group"]) || "other", category: opt(r.category), name: str(r.name), memo: str(r.memo), date: day(r.date), amount: num(r.amount),
@@ -336,6 +337,19 @@ export const actions = {
     amount == null ? backend.removeBudget(month, GOAL_KEY) : backend.upsertKeyed("budgets", [{ month, category: GOAL_KEY, amount }]),
 
   saveSettings: (s: Settings) => backend.upsertKeyed("settings", [{ data: s }]),
+
+  /** 費目の名前を変える。明細・予算・ルール・定期・設定の一覧に入っている費目も一緒に変える */
+  async renameCategory(d: AppData, from: string, to: string) {
+    for (const e of d.cards) if (e.category === from) await backend.update("card_entries", e.id, { category: to });
+    for (const e of d.accounts) if (e.category === from) await backend.update("account_entries", e.id, { category: to });
+    for (const r of d.recurring) if (r.category === from) await backend.update("recurring", r.id, { category: to });
+    for (const r of d.rules) if (r.category === from) await backend.update("rules", r.id, { category: to });
+    const budgets = d.budgets.filter((b) => b.category === from);
+    if (budgets.length) await backend.upsertKeyed("budgets", budgets.map((b) => ({ ...b, category: to })));
+    for (const b of budgets) await backend.removeBudget(b.month, from);
+    const s = d.settings, ren = (xs: string[]) => xs.map((x) => (x === from ? to : x));
+    await backend.upsertKeyed("settings", [{ data: { ...s, varCats: ren(s.varCats), fixCats: ren(s.fixCats), dailyCats: ren(s.dailyCats) } }]);
+  },
 
   async saveRecurring(d: AppData, r: Partial<Recurring> & { id?: string }, today: string) {
     const { id, ...rest } = r;

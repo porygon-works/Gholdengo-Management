@@ -143,6 +143,7 @@ export interface Settings {
   dailyCats: string[]; // 1日に使える額を出す費目
   version: number; // データの形の版（src/data/store.ts で古い版を直す）
   v2CopiedAt?: string; // 前の版の表（entries・card_bills）から、この時刻までに入った行を写した
+  labels?: Record<string, string>; // 大費目の名前を変えたもの（キーは大費目の id）
 }
 
 export const RESERVE = "予備";

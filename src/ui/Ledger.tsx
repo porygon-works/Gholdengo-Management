@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { computeMonth, isLive, ymOf, type AccountEntry, type CardEntry, type Spend } from "../engine";
 import type { AppData } from "../data/store";
-import { ACCOUNT_GROUP_LABEL, accountTitle, Bar, CARD_GROUP_LABEL, cardTitle, Chip, Empty, md, ownCost, signed, StatusChip, wday, yen } from "./common";
+import { ACCOUNT_GROUP_LABEL, accountTitle, Bar, CARD_GROUP_LABEL, cardTitle, Chip, Empty, md, money, ownCost, signed, StatusChip, wday, yen } from "./common";
 import type { Open } from "./Sheets";
 
 type OnOpen = (o: Open) => void;
@@ -80,7 +80,7 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
       <div className="panel" key={c.cat} id={`cat-${c.cat}`}>
         <button className="cathead" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : c.cat)}>
           <span className="n">{c.cat} <Chip kind={st}>{c.rem < 0 ? `超過 ${yen(-c.rem)}` : `残り ${yen(c.rem)}`}</Chip></span>
-          <span className="s num">{yen(c.used + c.planned)}{c.planned ? `（予定：${yen(c.planned)}円）` : ""} / {yen(c.budget)}</span>
+          <span className="s num">{money(c.used + c.planned)}{c.planned ? `（${yen(c.planned)}）` : ""} / {money(c.budget)}</span>
         </button>
         <Bar budget={c.budget} used={c.used} planned={c.planned} />
         {isOpen ? (
@@ -99,7 +99,7 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
           <button role="tab" aria-pressed={mode === "cat"} onClick={() => setMode("cat")}>費目ごと</button>
           <button role="tab" aria-pressed={mode === "time"} onClick={() => setMode("time")}>日付ごと</button>
         </div>
-        <div className="btns"><button className="btn" onClick={onAdd}>＋ 明細・予定を入れる</button></div>
+        <div className="btns"><button className="btn" onClick={onAdd}>追加</button></div>
       </section>
       {mode === "time" ? <Timeline data={data} month={month} onOpen={onOpen} /> : (
         <>
@@ -114,11 +114,11 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
             </section>
           )}
           <section>
-            <h2>変動費 <small>{yen(v.U + v.P)}円{v.P ? `（予定：${yen(v.P)}円）` : ""}</small></h2>
+            <h2>{ACCOUNT_GROUP_LABEL.variable} <small>{money(v.U + v.P)}{v.P ? `（${yen(v.P)}）・（）内は予定` : ""}</small></h2>
             {shown.filter((c) => !c.fixed).map(catPanel)}
           </section>
           <section>
-            <h2>固定費 <small>見込み {yen(v.base.fixed)}</small></h2>
+            <h2>{ACCOUNT_GROUP_LABEL.fixed} <small>見込み {money(v.base.fixed)}・（）内は予定</small></h2>
             {shown.filter((c) => c.fixed).map(catPanel)}
           </section>
           {(v.outsideCards.length > 0 || v.outsideAccounts.length > 0) && (
