@@ -23,7 +23,12 @@ export interface Backend {
 const URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-export const supabase: SupabaseClient | null = URL && KEY ? createClient(URL, KEY, { auth: { persistSession: true, autoRefreshToken: true } }) : null;
+/** Supabase プロジェクト porygon-works には複数のアプリの DB があるので、この家計簿の表は ggmg スキーマに置く */
+export const SCHEMA = "ggmg";
+
+export const supabase = (URL && KEY
+  ? createClient(URL, KEY, { db: { schema: SCHEMA }, auth: { persistSession: true, autoRefreshToken: true } })
+  : null) as SupabaseClient | null;
 
 const check = (r: { error: { message: string } | null }) => { if (r.error) throw new Error(r.error.message); };
 

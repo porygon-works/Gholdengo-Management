@@ -17,11 +17,14 @@ Gmail ──(15分ごと)── GAS ──→ Supabase ←──→ Webアプリ
 
 ### 1. Supabase（データの置き場所）
 
-1. <https://supabase.com> にログインし、**New project** を作る（Region は Tokyo）。
-2. 左の **SQL Editor** を開き、`supabase/migrations/0001_init.sql` の中身を全部貼って **Run**。
-3. **Authentication → Users → Add user → Create new user** で、自分のメールとパスワードを入れて作る（Auto Confirm User にチェック）。
-4. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ** にする（自分以外がユーザーを作れないように）。
-5. 次の4つを控える。
+Supabase はプロジェクト **porygon-works** に複数のアプリの DB をまとめている。新しいプロジェクトは作らず、この家計簿の表は **`ggmg` スキーマ** に置く。
+
+1. <https://supabase.com> で **porygon-works** プロジェクトを開く。
+2. 左の **SQL Editor** を開き、`supabase/migrations/0001_init.sql` の中身を全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
+3. **Project Settings → Data API → Exposed schemas** に **`ggmg`** を足して **Save**（これをしないとアプリと GAS から表が見えない）。
+4. **Authentication → Users → Add user → Create new user** で、自分のメールとパスワードを入れて作る（Auto Confirm User にチェック。ほかのアプリで作ったユーザーがあればそれを使ってよい）。
+5. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ** にする（自分以外がユーザーを作れないように。ほかのアプリで新規登録を使っているなら、そちらに合わせる）。
+6. 次の4つを控える。
    - **Project URL**（Project Settings → Data API）
    - **anon / publishable キー**（Project Settings → API Keys）… アプリに入れる。公開してよいキー（RLS で守られる）
    - **service_role / secret キー**（同じ画面）… GAS だけに入れる。**ほかには絶対に置かない**
@@ -34,7 +37,7 @@ Gmail ──(15分ごと)── GAS ──→ Supabase ←──→ Webアプリ
    - `VITE_SUPABASE_URL` = Project URL
    - `VITE_SUPABASE_ANON_KEY` = anon / publishable キー
 3. 本番は `main` ブランチ。ほかのブランチは push するたびにプレビュー URL ができる。
-4. iPhone の Safari で URL を開き、共有ボタン → **ホーム画面に追加**。開いて、1-3 で作ったメールとパスワードでログイン。
+4. iPhone の Safari で URL を開き、共有ボタン → **ホーム画面に追加**。開いて、1-4 で作ったメールとパスワードでログイン。
 
 環境変数を入れずに開くと「お試しモード」（データはその端末のブラウザの中だけ）で動く。
 

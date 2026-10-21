@@ -7,6 +7,7 @@
  *     SUPABASE_SERVICE_KEY  Supabase の service_role キー（RLS を通らない強い鍵。ここ以外に置かない）
  *     OWNER_USER_ID         Supabase の Authentication → Users にある自分のユーザーの UID
  *     SINCE                 この日より前のメールは読まない（例 2026/10/20）。移行したデータと重ならないようにする
+ *   表は Supabase の ggmg スキーマにある（プロジェクト porygon-works に複数のアプリの DB をまとめているため）
  *   setup() を1回実行して、15分ごとのトリガーを作る
  *
  * しくみ
@@ -16,6 +17,7 @@
  */
 
 var SENDER = 'from:vpass.ne.jp';
+var SCHEMA = 'ggmg';
 
 function setup() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'run') ScriptApp.deleteTrigger(t); });
@@ -71,7 +73,7 @@ function post_(c, table, rows, onConflict, resolution) {
   var res = UrlFetchApp.fetch(c.url + '/rest/v1/' + table + '?on_conflict=' + onConflict, {
     method: 'post',
     contentType: 'application/json',
-    headers: { apikey: c.key, Authorization: 'Bearer ' + c.key, Prefer: 'resolution=' + resolution + ',return=minimal' },
+    headers: { apikey: c.key, Authorization: 'Bearer ' + c.key, 'Content-Profile': SCHEMA, Prefer: 'resolution=' + resolution + ',return=minimal' },
     payload: JSON.stringify(rows),
     muteHttpExceptions: true,
   });
@@ -80,7 +82,7 @@ function post_(c, table, rows, onConflict, resolution) {
 
 function fetchRules_(c) {
   var res = UrlFetchApp.fetch(c.url + '/rest/v1/rules?select=pattern,category&user_id=eq.' + c.owner, {
-    headers: { apikey: c.key, Authorization: 'Bearer ' + c.key }, muteHttpExceptions: true,
+    headers: { apikey: c.key, Authorization: 'Bearer ' + c.key, 'Accept-Profile': SCHEMA }, muteHttpExceptions: true,
   });
   if (res.getResponseCode() >= 300) throw new Error('ルールを読めませんでした: ' + res.getContentText());
   return JSON.parse(res.getContentText());
