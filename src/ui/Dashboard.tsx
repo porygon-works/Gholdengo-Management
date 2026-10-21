@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
-import { accountFlow, addDays, addMonths, budgetCats, computeMonth, groupOfCat, nextPayments, RESERVE, ymOf, type AccountEntry } from "../engine";
+import { accountFlow, addDays, addMonths, budgetCats, computeMonth, groupOfCat, nextPayments, PAY_GROUP_LABEL, RESERVE, ymOf, type AccountEntry, type PayGroup } from "../engine";
+import type { Open } from "./Sheets";
 import { actions, type AppData, type Store } from "../data/store";
 import { accountTitle, Bar, cardOfPay, Chip, Field, md, NumInput, payLabels, payOptions, Select, signed, toast, yen, ymLabel, type Pay } from "./common";
 
@@ -11,6 +12,7 @@ interface Props {
   reviews: number;
   go: (to: "ledger" | "review" | "passbook" | "balance" | "settings", cat?: string) => void;
   open: (e: AccountEntry) => void;
+  onOpen: (o: Open) => void;
 }
 
 /** 使ったものを入れる。クレカはクレカ明細、現金は財布、PayPay・口座は口座の口座明細 */
@@ -126,45 +128,46 @@ function AccountFlow({ data, today, go, open }: { data: AppData; today: string; 
   );
 }
 
-/** 来月の支払い予定（§5.6）：来月に口座から出るお金を引落日の順に。クレカ支払いは中身を下に出す */
-function NextMonth({ data, month, today, open }: { data: AppData; month: string; today: string; open: Props["open"] }) {
-  const n = nextPayments(data, addMonths(month, 1), today);
+/** 来月の支払い予定（§5.6）：来月に口座から出るお金を大費目ごとに。タップでその大費目の明細を開く */
+function NextMonth({ data, month, onOpen }: { data: AppData; month: string; onOpen: (o: Open) => void }) {
+  const n = nextPayments(data, addMonths(month, 1));
+  const [open, setOpen] = useState<PayGroup | null>(null);
   const cur = +month.slice(5);
   return (
     <section>
-      <h2>来月の支払い予定 <small>{ymLabel(n.ym)}に口座から出るお金</small></h2>
+      <h2>来月の支払い予定 <small>{ymLabel(n.ym)}に口座から出るお金・タップで明細</small></h2>
       <div className="panel scroll">
-        {n.rows.length ? (
+        {n.groups.length ? (
           <table className="tbl">
-            <thead><tr><th>日</th><th style={{ textAlign: "left" }}>内容</th><th>金額</th></tr></thead>
+            <thead><tr><th style={{ textAlign: "left" }}>大費目</th><th>件数</th><th>金額</th></tr></thead>
             <tbody>
-              {n.rows.map((r) => (
-                <Fragment key={r.entry.id}>
-                  <tr className="tap" onClick={() => open(r.entry)}>
-                    <td className="num">{md(r.date)}</td>
-                    <td style={{ textAlign: "left" }}><b>{r.name}</b> {r.state !== "確定" && <Chip kind="warn">{r.state}</Chip>}</td>
-                    <td className="num"><b>{yen(r.amount)}</b></td>
+              {n.groups.map((g) => (
+                <Fragment key={g.group}>
+                  <tr className="tap" onClick={() => setOpen(open === g.group ? null : g.group)} aria-expanded={open === g.group}>
+                    <td style={{ textAlign: "left" }}><b>{open === g.group ? "▾" : "▸"} {PAY_GROUP_LABEL[g.group]}</b></td>
+                    <td className="num">{g.items.length}件</td>
+                    <td className="num"><b>{signed(g.amount)}</b></td>
                   </tr>
-                  {r.parts.map((p) => (
-                    <tr key={p.label} className="sub">
+                  {open === g.group && g.items.map((x, i) => (
+                    <tr key={i} className={x.card || x.account ? "tap" : ""} onClick={() => { if (x.card) onOpen({ type: "card", entry: x.card }); else if (x.account) onOpen({ type: "account", entry: x.account }); }}>
+                      <td style={{ textAlign: "left", paddingLeft: 20 }}>{x.name} {x.plan && <Chip kind="warn">予定</Chip>}<div className="note">{md(x.date)}・{x.from}</div></td>
                       <td />
-                      <td style={{ textAlign: "left", paddingLeft: 16 }} className="note">└ {p.label}</td>
-                      <td className="num note">{signed(p.amount)}</td>
+                      <td className="num">{signed(x.amount)}</td>
                     </tr>
                   ))}
                 </Fragment>
               ))}
             </tbody>
-            <tfoot><tr><td /><td style={{ textAlign: "left" }}>計</td><td className="num">{yen(n.total)}</td></tr></tfoot>
+            <tfoot><tr><td style={{ textAlign: "left" }}>計</td><td /><td className="num">{yen(n.total)}</td></tr></tfoot>
           </table>
         ) : <div className="note">来月に口座から出るお金の予定はまだありません</div>}
-        <div className="note">クレカの請求は、{cur}月にカードで使った分（予定を含む）です。これからカードで使うと増えます。行をタップすると詳細を見られます。</div>
+        <div className="note">クレカの分は、{cur}月にカードで使ったもの（予定を含む）。これからカードで使うと増えます。明細の日付は口座から出る日（クレカは引落日）です。</div>
       </div>
     </section>
   );
 }
 
-export function Dashboard({ store, data, month, today, reviews, go, open }: Props) {
+export function Dashboard({ store, data, month, today, reviews, go, open, onOpen }: Props) {
   const v = computeMonth(data, month, today);
   const b = v.base;
   const rows = v.cats.filter((c) => c.budget || c.used || c.planned);
@@ -261,7 +264,7 @@ export function Dashboard({ store, data, month, today, reviews, go, open }: Prop
         </div>
       </section>
 
-      <NextMonth data={data} month={month} today={today} open={open} />
+      <NextMonth data={data} month={month} onOpen={onOpen} />
     </>
   );
 }

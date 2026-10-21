@@ -251,7 +251,7 @@ describe("口座", () => {
     expect(f.last).toBe(189500);
     expect(accountsWithBills(d, "2026-10-21", ["2026-10", "2026-11"]).filter((e) => e.group === "card").map((e) => e.name)).toEqual(["三井 9月分", "セゾン 10月分"]);
   });
-  it("来月の支払い予定：引落日の順に1件ずつ。クレカ支払いは中身を大費目ごとの合計に分ける", () => {
+  it("来月の支払い予定：大費目ごとに分ける。クレカは中身の明細で、一部の立替は立替へ。クレカ支払いの行は数えない", () => {
     const d = D({
       cards: [
         C({ card: "saison", group: "fixed", category: "家賃", name: "家賃", amount: 70000, date: "2026-10-27", status: "plan" }),
@@ -263,17 +263,12 @@ describe("口座", () => {
       accounts: [
         A({ amount: 30000, group: "fixed", category: "奨学金", name: "奨学金", date: "2026-11-27", status: "plan" }),
         A({ amount: 2000, group: "fixed", category: "保険・共済", name: "共済", date: "2026-11-09", status: "plan" }),
+        A({ amount: 99999, group: "card", category: null, card: "smbc", date: "2026-11-26", status: "plan", source_ref: "bill:smbc:2026-11-26" }),
       ],
     });
-    const n2 = nextPayments(d, "2026-11", "2026-10-21");
-    expect(n2.rows.map((r) => [r.date, r.name, r.amount, r.state])).toEqual([
-      ["2026-11-04", "セゾン 10月分", 80000, "見込み"],
-      ["2026-11-09", "共済", 2000, "予定"],
-      ["2026-11-26", "三井 10月分", 13000, "見込み"],
-      ["2026-11-27", "奨学金", 30000, "予定"],
-    ]);
-    expect(n2.rows[0].parts).toEqual([{ label: "固定費", amount: 70000 }, { label: "分割の返済", amount: 10000 }]);
-    expect(n2.rows[2].parts).toEqual([{ label: "変動費", amount: 6000 }, { label: "立替", amount: 7000 }]);
+    const n2 = nextPayments(d, "2026-11");
+    expect(n2.groups.map((g) => [g.group, g.amount, g.items.length])).toEqual([["fixed", 102000, 3], ["variable", 6000, 2], ["installment", 10000, 1], ["tatekae", 7000, 2]]);
+    expect(n2.groups[0].items.map((x) => [x.date, x.name, x.from])).toEqual([["2026-11-04", "家賃", "セゾン"], ["2026-11-09", "共済", "口座"], ["2026-11-27", "奨学金", "口座"]]);
     expect(n2.total).toBe(125000);
   });
 });

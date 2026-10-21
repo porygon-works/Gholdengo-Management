@@ -84,7 +84,7 @@ function Main() {
               if (to === "balance") setSheet({ type: "balance" });
               else if (to === "ledger") { setFocusCat(cat ?? null); go("ledger"); }
               else go(to);
-            }} open={(entry) => setSheet({ type: "account", entry })} />}
+            }} open={(entry) => setSheet({ type: "account", entry })} onOpen={openEntry} />}
             {screen === "ledger" && <Ledger data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "new" })} />}
             {screen === "plans" && <Plans data={data} month={month} today={today} onOpen={openEntry} onAdd={() => setSheet({ type: "new", plan: true })} />}
             {screen === "settings" && <SettingsView store={store} data={data} month={month} />}
