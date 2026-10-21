@@ -11,8 +11,8 @@ describe("v2 → v3", () => {
     expect(convertEntry(row({ source: "card_flash", status: "flash", source_ref: "m#1" }), S).cards[0]).toMatchObject({ card: "smbc", group: "variable", status: "confirmed", source: "card_flash", source_ref: "m#1" });
     expect(convertEntry(row({ category: "家賃", card: "saison" }), S).cards[0]).toMatchObject({ card: "saison", group: "fixed", category: "家賃" });
     expect(convertEntry(row({ method: "revo" }), S).cards[0].group).toBe("purchase");
-    // 分割（返済）は引落日の日付のまま
-    expect(convertEntry(row({ category: "返済", date: "2026-10-26" }), S).cards[0]).toMatchObject({ group: "installment", category: null, date: "2026-10-26" });
+    // 返済は引落日の日付だったので、その請求に入る締め期間の最後の日にする
+    expect(convertEntry(row({ category: "返済", date: "2026-10-26" }), S).cards[0]).toMatchObject({ group: "installment", category: null, date: "2026-09-30" });
     expect(convertEntry(row({ category: "予算外" }), S).cards[0].group).toBe("tatekae");
   });
   it("口座・PayPay は口座、現金・交通系は財布。収入は給与・追加予算・立替の返金・その他", () => {
@@ -21,7 +21,7 @@ describe("v2 → v3", () => {
     expect(convertEntry(row({ kind: "income", method: "bank", category: null, recurring_id: "r" }), S).accounts[0].group).toBe("salary");
     expect(convertEntry(row({ kind: "income", method: "bank", category: "追加予算" }), S).accounts[0].group).toBe("extra");
     expect(convertEntry(row({ kind: "income", method: "cash", category: null, item: "立替の返金（飲み会）" }), S).accounts[0]).toMatchObject({ account: "wallet", group: "refund" });
-    expect(convertEntry(row({ method: "bank", category: "返済", item: "セゾン リボ返済", status: "plan" }), S).cards[0]).toMatchObject({ card: "saison", group: "installment", status: "plan", date: "2026-10-10" });
+    expect(convertEntry(row({ method: "bank", category: "返済", item: "セゾン リボ返済", status: "plan" }), S).cards[0]).toMatchObject({ card: "saison", group: "installment", status: "plan", date: "2026-09-30" });
     expect(convertEntry(row({ method: "bank", category: "固定引落", item: "家賃" }), S).accounts[0].category).toBe("家賃");
   });
   it("ATM は口座の出金と財布の入金の2行。ポイントは捨てる", () => {

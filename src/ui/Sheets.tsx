@@ -89,7 +89,7 @@ export function CardSheet({ store, data, entry, preset, onClose, switcher }: { s
         <Field label="大費目"><Select value={group} options={CARD_GROUPS} labels={CARD_GROUP_LABEL} onChange={setGroup} /></Field>
       </div>
       {(group === "variable" || group === "fixed") && <Field label="費目"><Select value={cat} options={catOptions(data)} onChange={pickCat} /></Field>}
-      {group === "installment" && <div className="note">分割（返済）：毎月の返済額。日付は引落日にします（その日の請求に入る）。予算には数えません（目標用マイナスの中で払う）。</div>}
+      {group === "installment" && <div className="note">分割（返済）：毎月の返済額。請求に入り、予算には数えません（目標用マイナスの中で払う）。</div>}
       {group === "purchase" && <div className="note">分割（購入）：リボ・分割で買った物。請求にも予算にも入れません。目標マスタの返済の残高に足してください。</div>}
       {group === "tatekae" && <div className="note">立替：全額を立て替えた。請求には入り、予算には数えません。</div>}
       <div className="grid2">

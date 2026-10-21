@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, cardPayDate, categorize, closingEnd, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
+  addMonths, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type Goal, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
@@ -59,7 +59,7 @@ function readCache(): Raw | null { try { return JSON.parse(localStorage.getItem(
  */
 async function migrate4(raw: Raw, d: AppData): Promise<boolean> {
   const saved = raw.settings[0]?.data as (Partial<Settings> & { savingMonthly?: number; savingStart?: string | null; reserveGoal?: number }) | undefined;
-  if (!saved || (saved.version ?? 1) >= 4) return false; // 版4にしたあと、版5（migrate5）で返済の日付を直す
+  if (!saved || (saved.version ?? 1) >= 4) return false;
   const s = d.settings;
   // v1：固定費を家賃・奨学金・保険・共済に分けた
   const fixCats = (saved.version ?? 1) < 2 ? [...["家賃", "奨学金", "保険・共済"].filter((c) => !s.fixCats.includes(c) && !s.varCats.includes(c)), ...s.fixCats] : s.fixCats;
@@ -78,7 +78,7 @@ async function migrate4(raw: Raw, d: AppData): Promise<boolean> {
     }
   }
   const { savingMonthly: _a, savingStart: _b, reserveGoal: _c, ...rest } = saved as Record<string, unknown>;
-  await backend.upsertKeyed("settings", [{ data: { ...rest, cards: s.cards, fixCats, version: 4 } }]); // 続けて版5にする
+  await backend.upsertKeyed("settings", [{ data: { ...rest, cards: s.cards, fixCats, version: 4 } }]);
   return true;
 }
 
@@ -120,26 +120,9 @@ async function copyV2(raw: Raw, d: AppData): Promise<boolean> {
  * 5. クレカ明細の重複を自動でまとめる
  * 6. 今月の費目予算がまだなければ、前の月から引き継いだ値を保存する
  */
-/**
- * 版5：クレカ明細の分割（返済）を、締め期間の最後の日から引落日の日付に変える（見て分かるように）。
- * 版4で写した前の版の返済と、目標から作った返済の予定が、締め月の最後の日になっている
- */
-async function migrate5(raw: Raw, d: AppData): Promise<boolean> {
-  const saved = raw.settings[0]?.data as Partial<Settings> | undefined;
-  if (!saved || (saved.version ?? 1) !== 4) return false;
-  const s = d.settings;
-  for (const e of d.cards) {
-    if (e.group !== "installment" || e.date !== closingEnd(ymOf(e.date), s, e.card)) continue;
-    await backend.update("card_entries", e.id, { date: cardPayDate(ymOf(e.date), s, e.card) });
-  }
-  await backend.upsertKeyed("settings", [{ data: { ...s, version: 5 } }]);
-  return true;
-}
-
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); return true; }
   if (await migrate4(raw, d)) return true;
-  if (await migrate5(raw, d)) return true;
   if (await copyV2(raw, d)) return true;
   let wrote = false;
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }
