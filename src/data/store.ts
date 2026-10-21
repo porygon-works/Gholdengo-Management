@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, BASE_KEYS, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf, type BaseKey,
+  addMonths, BASE_KEYS, categorize, computeMonth, DEFAULT_SETTINGS, FIXED_DEBIT, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf, type BaseKey,
   type Balance, type Budget, type CardBill, type Data, type Debt, type Entry, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, type Raw, type Row } from "./backend";
@@ -46,12 +46,40 @@ function readCache(): Raw | null { try { return JSON.parse(localStorage.getItem(
 
 /**
  * 読み込んだあとの自動処理。何か書いたら true を返す（読み直す）
+ * 0. 古い版のデータを今の形に直す（migrate）
  * 1. 初めての起動なら設定とルールの初めの値を入れる
  * 2. 定期のお金から、今月〜5か月先の予定を作る（3か月先の月の判定に、その先の給与まで要るため）
  * 3. 未分類の明細に、あとから覚えたルールを当てる。そのあと重複を自動でまとめる
  * 4. 今月の費目予算がまだなければ、前の月から引き継いだ値を保存する
  */
+/**
+ * 版1 → 版2：固定費を「固定引落」1つから、家賃・奨学金・保険・共済などの費目に分けた。
+ * 大項目（固定費／変動費）は settings.fixCats / varCats で決める。
+ */
+async function migrate(raw: Raw, d: AppData): Promise<boolean> {
+  const saved = raw.settings[0]?.data as Partial<Settings> | undefined;
+  if (!saved || (saved.version ?? 1) >= 2) return false;
+  const to = (name: string) => (/家賃/.test(name) ? "家賃" : /奨学金/.test(name) ? "奨学金" : /共済|保険/.test(name) ? "保険・共済" : null);
+  let leftover = false;
+  for (const e of d.entries) {
+    if (e.category !== FIXED_DEBIT) continue;
+    const c = to(e.item || e.shop);
+    if (c) await backend.update("entries", e.id, { category: c }); else leftover = true;
+  }
+  for (const r of d.recurring) {
+    if (r.category !== FIXED_DEBIT) continue;
+    const c = to(r.name);
+    if (c) await backend.update("recurring", r.id, { category: c }); else leftover = true;
+  }
+  for (const b of d.budgets) if (b.category === "#固定費") await backend.removeBudget(b.month, b.category);
+  const fix = [...["家賃", "奨学金", "保険・共済"].filter((c) => !d.settings.fixCats.includes(c) && !d.settings.varCats.includes(c)), ...d.settings.fixCats];
+  if (leftover && !fix.includes(FIXED_DEBIT)) fix.push(FIXED_DEBIT);
+  await backend.upsertKeyed("settings", [{ data: { ...d.settings, fixCats: fix, version: 2 } }]);
+  return true;
+}
+
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
+  if (await migrate(raw, d)) return true;
   let wrote = false;
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); wrote = true; }
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }

@@ -1,7 +1,7 @@
 import { addDays, addMonths, daysBetween, lastDay, ymOf } from "./dates";
 import { isLive } from "./merge";
 import { cardPayDate, cashDate, ownCost } from "./schedule";
-import { BASE_KEYS, budgetCats, FIXED_DEBIT, INCOME_EXTRA, INCOME_SALARY, nonBudgetCats, REPAY, RESERVE, type Balance, type BaseKey, type Data, type Entry, type Settings } from "./types";
+import { BASE_KEYS, budgetCats, INCOME_EXTRA, INCOME_SALARY, isFixedCat, nonBudgetCats, REPAY, RESERVE, type Balance, type BaseField, type BaseKey, type Data, type Entry, type Settings } from "./types";
 
 // 仕様書 §5 の計算式
 
@@ -155,13 +155,12 @@ export function budgetsFor(d: Data, ym: string): Map<string, number> {
   const src = months.length ? months[months.length - 1] : null;
   const map = new Map<string, number>();
   if (src) for (const b of catRows) if (b.month === src) map.set(b.category, b.amount);
-  if (src !== ym) map.delete(RESERVE); // 予備は引き継がない（その月に計算する）
-  if (!src) {
-    // 予算がまだ一度もないときは、定期の支出の見込みを固定費の初めの値にする
-    for (const r of d.recurring) {
-      if (!r.active || r.kind !== "expense" || !r.category || !d.settings.fixCats.includes(r.category)) continue;
-      map.set(r.category, (map.get(r.category) || 0) + r.amount);
-    }
+  map.delete(RESERVE); // 予備はその月に計算する
+  // 予算を入れていない固定費の費目は、定期のお金に入れたその月の額を初めの値にする
+  for (const c of d.settings.fixCats) {
+    if (map.has(c)) continue;
+    const sum = d.recurring.filter((r) => r.active && r.kind === "expense" && r.category === c && (!r.start_month || r.start_month <= ym) && (!r.end_month || r.end_month >= ym)).reduce((a, r) => a + r.amount, 0);
+    if (sum) map.set(c, sum);
   }
   return map;
 }
@@ -172,35 +171,35 @@ export const isSalary = (e: Entry) => e.kind === "income" && (e.category === INC
 export interface MonthBase {
   salary: number; // 給与
   extra: number; // 追加予算（イベチケなど、予算に足すと決めた入金）
-  fixed: number; // 固定費（家賃・奨学金・共済などの口座引落）
+  fixed: number; // 固定費（大項目が固定費の費目の予算の合計）
   goal: number; // 目標用マイナス（リボの返済の計画分・貯金）
   T: number; // 今月の予算（自由に使えるお金）＝ 給与 ＋ 追加予算 − 固定費 − 目標用マイナス
-  auto: Record<BaseKey, number>; // 明細と予定から出した値
-  manual: Record<BaseKey, boolean>; // 本人が手で直したか
+  auto: Record<BaseField, number>; // 明細と予定から出した値
+  manual: Record<BaseField, boolean>; // 本人が手で直したか（固定費は費目の予算で直すので、いつも false）
   repay: number; // その月の返済（目標用マイナスの初期値に入る）
   saving: number; // その月の貯金（目標用マイナスの初期値に入る）
 }
 
 /**
- * その月の「予算の元」（§5）。明細と予定から出し、本人が手で直した月はその値を使う。
+ * その月の「予算の元」（§5.1）。給与・追加予算・目標用マイナスは明細と予定から出し、本人が手で直した月はその値を使う。
+ * 固定費は、大項目が固定費の費目の予算（見込み）の合計。
  * 立替の返金・賞与・売却代金などは、「追加予算」にしたときだけ入る。
  */
 export function monthBase(d: Data, ym: string): MonthBase {
-  let salary = 0, extra = 0, fixed = 0, repay = 0;
+  let salary = 0, extra = 0, repay = 0;
   for (const e of d.entries) {
     if (!isLive(e) || ymOf(e.date) !== ym) continue;
     if (e.kind === "income") {
       if (isSalary(e)) salary += e.amount;
       else if (e.category === INCOME_EXTRA) extra += e.amount;
-    } else if (e.kind === "expense") {
-      if (e.category === FIXED_DEBIT) fixed += e.amount;
-      else if (e.category === REPAY) repay += e.amount;
-    }
+    } else if (e.kind === "expense" && e.category === REPAY) repay += e.amount;
   }
   const s = d.settings;
+  const budgets = budgetsFor(d, ym);
+  const fixed = s.fixCats.reduce((a, c) => a + (budgets.get(c) || 0), 0);
   const saving = s.savingStart && ym >= s.savingStart ? s.savingMonthly || 0 : 0;
-  const auto: Record<BaseKey, number> = { salary, extra, fixed, goal: repay + saving };
-  const manual = { salary: false, extra: false, fixed: false, goal: false } as Record<BaseKey, boolean>;
+  const auto: Record<BaseField, number> = { salary, extra, fixed, goal: repay + saving };
+  const manual: Record<BaseField, boolean> = { salary: false, extra: false, fixed: false, goal: false };
   const val = { ...auto };
   for (const k of Object.keys(BASE_KEYS) as BaseKey[]) {
     const hit = d.budgets.find((b) => b.month === ym && b.category === BASE_KEYS[k]);
@@ -211,6 +210,7 @@ export function monthBase(d: Data, ym: string): MonthBase {
 
 export interface CatRow {
   cat: string;
+  fixed: boolean; // 大項目が固定費
   budget: number;
   used: number;
   planned: number;
@@ -227,14 +227,15 @@ export interface MonthView {
   daysLeft: number; // 今日を含む月末までの日数（過ぎた月は 0）
   base: MonthBase;
   T: number; // 今月の予算（自由に使えるお金）
-  U: number; // 使った
-  P: number; // これから使う予定
-  R: number; // 自由に使える残り ＝ T − U − P
+  U: number; // 変動費で使った
+  P: number; // 変動費のこれから使う予定
+  fixedOver: number; // 固定費が予算（見込み）をこえた分
+  R: number; // 自由に使える残り ＝ T − U − P − fixedOver
   cats: CatRow[];
   reserveBudget: number;
   overAllocated: boolean;
   unclassified: Entry[];
-  outside: Entry[]; // 自由に使えるお金に入れない支出（固定引落・返済・予算外・リボで買った物）
+  outside: Entry[]; // 予算に入れない支出（返済・予算外・リボで買った物）
   incomes: Entry[];
 }
 
@@ -246,7 +247,7 @@ export function computeMonth(d: Data, ym: string, today: string): MonthView {
   const cats = budgetCats(s);
   const rows = new Map<string, CatRow>();
   const budgets = budgetsFor(d, ym);
-  for (const c of cats) rows.set(c, { cat: c, budget: budgets.get(c) || 0, used: 0, planned: 0, rem: 0, daily: null, entries: [], plans: [], unclassified: 0 });
+  for (const c of cats) rows.set(c, { cat: c, fixed: isFixedCat(s, c), budget: budgets.get(c) || 0, used: 0, planned: 0, rem: 0, daily: null, entries: [], plans: [], unclassified: 0 });
 
   const unclassified: Entry[] = [], outside: Entry[] = [], incomes: Entry[] = [];
   let U = 0, P = 0;
@@ -258,13 +259,15 @@ export function computeMonth(d: Data, ym: string, today: string): MonthView {
     if (!c) { outside.push(e); continue; }
     const row = rows.get(c)!;
     if (!e.category && e.status !== "plan") { unclassified.push(e); row.unclassified += ownCost(e); }
-    if (e.status === "plan") { row.planned += ownCost(e); row.plans.push(e); P += ownCost(e); }
-    else { row.used += ownCost(e); row.entries.push(e); U += ownCost(e); }
+    if (e.status === "plan") { row.planned += ownCost(e); row.plans.push(e); if (!row.fixed) P += ownCost(e); }
+    else { row.used += ownCost(e); row.entries.push(e); if (!row.fixed) U += ownCost(e); }
   }
 
   const base = monthBase(d, ym);
   const T = base.T;
-  const others = cats.filter((c) => c !== RESERVE).reduce((a, c) => a + rows.get(c)!.budget, 0);
+  // 固定費は予算（見込み）を給与から引いてあるので、こえた分だけを自由に使えるお金から引く
+  const fixedOver = [...rows.values()].filter((r) => r.fixed).reduce((a, r) => a + Math.max(0, r.used + r.planned - r.budget), 0);
+  const others = cats.filter((c) => c !== RESERVE && !isFixedCat(s, c)).reduce((a, c) => a + rows.get(c)!.budget, 0);
   const reserveRow = rows.get(RESERVE)!;
   reserveRow.budget = T - others;
   const reserveBudget = reserveRow.budget;
@@ -276,7 +279,7 @@ export function computeMonth(d: Data, ym: string, today: string): MonthView {
     r.plans.sort((a, b) => a.date.localeCompare(b.date));
   }
   return {
-    ym, when, daysLeft, base, T, U, P, R: T - U - P, cats: cats.map((c) => rows.get(c)!), reserveBudget,
+    ym, when, daysLeft, base, T, U, P, fixedOver, R: T - U - P - fixedOver, cats: cats.map((c) => rows.get(c)!), reserveBudget,
     overAllocated: reserveBudget < 0, unclassified, outside, incomes,
   };
 }
