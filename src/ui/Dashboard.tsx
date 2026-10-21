@@ -211,7 +211,7 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
             <tbody>
               <tr><td>給与</td><td className="num">{money(b.salary)}</td></tr>
               {b.extra !== 0 && <tr><td>＋ 追加予算（イベチケなど）</td><td className="num">{money(b.extra)}</td></tr>}
-              {b.carryInfo && <tr><td>{b.carry < 0 ? "− 前月からの繰越（前の月までの支払いに、口座のお金が足りない分）" : "＋ 前月からの繰越"}</td><td className="num">{money(Math.abs(b.carry))}</td></tr>}
+              {b.carryInfo && <tr><td>{b.carry < 0 ? "− 前月からの繰越（前の月に予算より多く出た分）" : "＋ 前月からの繰越"}</td><td className="num">{money(Math.abs(b.carry))}</td></tr>}
               <tr><td>− 固定費（家賃・奨学金・通信・サブスクなど）</td><td className="num">{money(b.fixed)}</td></tr>
               <tr><td>− 目標用マイナス（リボの返済・積立）{b.goalManual && <span className="note">（この月だけ直した額）</span>}</td><td className="num">{money(b.goal)}</td></tr>
               {v.fixedOver > 0 && <tr><td>（固定費が見込みをこえた分 {yen(v.fixedOver)}円 は、残り予算から引いています）</td><td /></tr>}

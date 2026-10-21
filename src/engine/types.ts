@@ -166,7 +166,7 @@ export const DEFAULT_SETTINGS: Settings = {
   varCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽", "美容", "医療", "衣服"],
   fixCats: ["家賃", "奨学金", "保険・共済", "通信", "水道ガス光熱費", "定期代", "サブスク"],
   dailyCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽"],
-  version: 7,
+  version: 8,
   carryFrom: null,
   budgetDefault: 90000,
 };

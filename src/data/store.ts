@@ -160,15 +160,17 @@ async function migrate6(raw: Raw, d: AppData): Promise<boolean> {
 }
 
 /**
- * 版6まで → 版7：今月から、前月からの繰越（§5.8）を入れ、予算を使えるお金から決める（§5.1）。
- * 始める月のない積立は今月からにする（たまった額を月ごとに数え、繰越から引くため）
+ * 版7まで → 版8：来月から、前月からの繰越（§5.8）を入れ、予算を使えるお金から決める（§5.1）。
+ * 来月の初めの残りを「いつもの残り」とする（今月より前は、前の家計簿から移した明細がそろっていないため）。
+ * 始める月のない積立は来月からにする（たまった額を月ごとに数え、繰越から引くため）。版7の繰越の上限・回す積立の設定は消す
  */
-async function migrate7(raw: Raw, d: AppData, today: string): Promise<boolean> {
+async function migrate8(raw: Raw, d: AppData, today: string): Promise<boolean> {
   const saved = raw.settings[0]?.data as Partial<Settings> | undefined;
-  if (!saved || (saved.version ?? 1) >= 7) return false;
-  const cur = ymOf(today);
-  for (const g of d.goals) if (g.kind === "save" && !g.start_month) await backend.update("goals", g.id, { start_month: cur });
-  await backend.upsertKeyed("settings", [{ data: { ...d.settings, version: 7, carryFrom: cur } }]);
+  if (!saved || (saved.version ?? 1) >= 8) return false;
+  const next = addMonths(ymOf(today), 1);
+  for (const g of d.goals) if (g.kind === "save" && !g.start_month) await backend.update("goals", g.id, { start_month: next });
+  const { carryCap: _a, carryGoal: _b, ...rest } = d.settings as Settings & { carryCap?: number; carryGoal?: string };
+  await backend.upsertKeyed("settings", [{ data: { ...rest, version: 8, carryFrom: next } }]);
   return true;
 }
 
@@ -176,7 +178,7 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); return true; }
   if (await migrate4(raw, d)) return true;
   if (await migrate6(raw, d)) return true;
-  if (await migrate7(raw, d, today)) return true;
+  if (await migrate8(raw, d, today)) return true;
   if (await copyV2(raw, d)) return true;
   let wrote = false;
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }

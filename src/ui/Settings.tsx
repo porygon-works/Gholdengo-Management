@@ -102,10 +102,11 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
 function CarryLine({ data, month }: { data: AppData; month: string }) {
   const c = monthBase(data, month).carryInfo!;
   const row = (label: string, v: number) => <tr><td>{label}</td><td className="num">{money(v)}</td></tr>;
+  const first = month === c.baseYm;
   return (
     <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
       <div className="legend" style={{ justifyContent: "space-between" }}>
-        <b style={{ color: "var(--ink)" }}>{c.raw < 0 ? "− 前月からの繰越（前の月までの支払いに足りない分）" : "＋ 前月からの繰越"}</b>
+        <b style={{ color: "var(--ink)" }}>{c.raw < 0 ? "− 前月からの繰越（前の月に予算より多く出た分）" : "＋ 前月からの繰越"}</b>
         <b className={`num ${c.raw < 0 ? "neg" : ""}`}>{signed(c.raw)}円</b>
       </div>
       <table className="tbl">
@@ -114,10 +115,14 @@ function CarryLine({ data, month }: { data: AppData; month: string }) {
           {row("− まだ引き落とされていないクレカ（前の月までに使った分）", c.owed)}
           {c.saved !== 0 && row("− 積立にたまった額（口座に置いたまま）", c.saved)}
           {c.safety !== 0 && row("− 安全残高", c.safety)}
+          <tr><td>＝ 前の月の終わりの残り</td><td className="num">{signed(c.left)}</td></tr>
+          {row(`− いつもの残り（始めた ${ymLabel(c.baseYm)} の初めの残り）`, c.base)}
         </tbody>
         <tfoot><tr><td>＝ 繰越</td><td className="num">{signed(c.raw)}</td></tr></tfoot>
       </table>
-      <div className="note">前の月の終わりに残ったお金のうち、使い道が決まっていない分です（前の月に予算にしなかった分・使い残した分を含みます）。</div>
+      <div className="note">{first
+        ? `${ymLabel(c.baseYm)}から繰越を始めたので、この月の初めの残りを「いつもの残り」として、繰越は0です（前の月のクレカをこの月の給与で払う、いつものずれは数えません）。`
+        : "いつもの残りより増えた分（前の月に予算にしなかった分・使い残した分）を足し、減った分（予算より多く出た分）を引きます。"}</div>
     </div>
   );
 }

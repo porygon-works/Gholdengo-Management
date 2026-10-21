@@ -15,7 +15,7 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
 | 項目 | 中身 |
 | --- | --- |
 | `summary` | アプリが計算したまとめ。**数を答えるときはこれを使う**（自分で計算し直さない） |
-| `summary.thisMonth` | 今月の予算（`budget`）・残り予算（`remaining`）・予算の元（`base`：給与・追加予算・前月からの繰越・固定費・目標用マイナス・使えるお金 `available`・予算を決めたか `budgetDecided`）・繰越の内訳（`carry`）・費目ごと（`categories`：予算・使った・予定・残り） |
+| `summary.thisMonth` | 今月の予算（`budget`）・残り予算（`remaining`）・予算の元（`base`：給与・追加予算・前月からの繰越・固定費・目標用マイナス・使えるお金 `available`・予算を決めたか `budgetDecided`）・繰越の内訳（`carry`：その月の初めの残り `left`・いつもの残り `base`・繰越 `raw`）・費目ごと（`categories`：予算・使った・予定・残り） |
 | `summary.account` | いまの口座残高（`bankNow`）・財布（`walletNow`）・次の給料日（`nextPayday`）・給料日の前日に残る額（`leftBeforePayday`）・それまでの口座の動き（`flow`） |
 | `summary.nextMonthPayments` | 来月に口座から出るお金（大費目ごと・明細つき） |
 | `summary.nextMonthBudget` | 来月の予算と予算の元 |
