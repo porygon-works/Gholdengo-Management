@@ -8,13 +8,15 @@
  *     OWNER_USER_ID         Supabase の Authentication → Users にある自分のユーザーの UID
  *     SINCE                 この日より前のメールは読まない（例 2026/10/20）。移行したデータと重ならないようにする
  *   表は Supabase の ggmg スキーマにある（プロジェクト porygon-works に複数のアプリの DB をまとめているため）
- *   setup() を1回実行して、15分ごとのトリガーを作る
+ *   setup() を1回実行して、15分ごとのトリガー（メールの取り込み）と1時間ごとのトリガー（Google ドライブへの書き出し）を作る
  *
  * しくみ
  *   - 毎回、直近3日の vpass.ne.jp からのメールをすべて読む（Gmail のラベルはスレッド単位なので使わない）
  *   - メールID＋何件目か を source_ref にして入れる。DB で重複禁止にしているので、何度読んでも二重にならない
  *   - 重複のまとめ（速報と確定明細、手入力との照合）はアプリが開いたときに行う。ここでは読んで入れるだけ
  *   - v3：利用はクレカ明細（card_entries）に、お支払い金額は口座明細（account_entries）の「クレカ支払い」の行に入れる
+ *   - 1時間に1回、アプリが保存した書き出し（snapshots）に最近のクレカ明細を足して、
+ *     Google ドライブの「Gholdengo/gholdengo-snapshot.json」に置く（Claude が読むため。docs/OPS.md）
  */
 
 var SENDER = 'from:vpass.ne.jp';
@@ -23,9 +25,43 @@ var CARD = 'smbc'; // アプリの設定のカードの id（1枚目のカード
 var CARD_NAME = '三井';
 
 function setup() {
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'run') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'run' || t.getHandlerFunction() === 'exportSnapshot') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('run').timeBased().everyMinutes(15).create();
+  ScriptApp.newTrigger('exportSnapshot').timeBased().everyHours(1).create();
   run();
+  exportSnapshot();
+}
+
+var SNAPSHOT_FOLDER = 'Gholdengo';
+var SNAPSHOT_FILE = 'gholdengo-snapshot.json';
+
+/**
+ * 1時間に1回：アプリが保存した書き出し（まとめ＋元のデータ）に、GAS がいま読んだ最近のクレカ明細を足して、
+ * Google ドライブに置く（同じファイルを上書き）。アプリを開いていなくても、メールから入った明細は新しくなる
+ */
+function exportSnapshot() {
+  var c = config_();
+  var snap = get_(c, 'snapshots?select=data,updated_at&user_id=eq.' + c.owner)[0];
+  var since = Utilities.formatDate(new Date(Date.now() - 45 * 864e5), 'Asia/Tokyo', 'yyyy-MM-dd');
+  var cards = get_(c, 'card_entries?select=id,card,status,date,amount,group,category,name,shop,source,merged_into&deleted=eq.false&date=gte.' + since + '&user_id=eq.' + c.owner + '&order=date.desc');
+  var out = snap ? snap.data : { format: 'gholdengo-snapshot-v1' };
+  out.appSavedAt = snap ? snap.updated_at : null;
+  out.gasExportedAt = new Date().toISOString();
+  out.note = 'summary はアプリを最後に開いた時点（appSavedAt）の計算。latestCardEntries は GAS が書き出した時点（gasExportedAt）のクレカ明細（直近45日）';
+  out.latestCardEntries = cards.filter(function (e) { return !e.merged_into; });
+  var folders = DriveApp.getFoldersByName(SNAPSHOT_FOLDER);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(SNAPSHOT_FOLDER);
+  var files = folder.getFilesByName(SNAPSHOT_FILE);
+  var body = JSON.stringify(out, null, 1);
+  if (files.hasNext()) files.next().setContent(body);
+  else folder.createFile(SNAPSHOT_FILE, body, 'application/json');
+  console.log('書き出し：' + SNAPSHOT_FOLDER + '/' + SNAPSHOT_FILE + '（' + body.length + '文字・アプリの保存 ' + out.appSavedAt + '）');
+}
+
+function get_(c, path) {
+  var res = UrlFetchApp.fetch(c.url + '/rest/v1/' + path, { headers: { apikey: c.key, Authorization: 'Bearer ' + c.key, 'Accept-Profile': SCHEMA }, muteHttpExceptions: true });
+  if (res.getResponseCode() >= 300) throw new Error(path.split('?')[0] + ' を読めませんでした: ' + res.getResponseCode() + ' ' + res.getContentText());
+  return JSON.parse(res.getContentText());
 }
 
 /** 15分ごとに動く */

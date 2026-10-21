@@ -20,7 +20,7 @@ Gmail ──(15分ごと)── GAS ──→ Supabase ←──→ Webアプリ
 Supabase はプロジェクト **porygon-works** に複数のアプリの DB をまとめている。新しいプロジェクトは作らず、この家計簿の表は **`ggmg` スキーマ** に置く。
 
 1. <https://supabase.com> で **porygon-works** プロジェクトを開く。
-2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` → `0005_deleted_every.sql` …）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
+2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` → `0005_deleted_every.sql` → `0006_snapshots.sql` …）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
 3. **Project Settings → Data API → Exposed schemas** に **`ggmg`** を足して **Save**（これをしないとアプリと GAS から表が見えない）。
 4. **Authentication → Users → Add user → Create new user** で、自分のメールとパスワードを入れて作る（Auto Confirm User にチェック。ほかのアプリで作ったユーザーがあればそれを使ってよい）。
 5. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ** にする（自分以外がユーザーを作れないように。ほかのアプリで新規登録を使っているなら、そちらに合わせる）。
@@ -70,6 +70,16 @@ Supabase はプロジェクト **porygon-works** に複数のアプリの DB を
 3. GAS のエディタで `コード.gs` を、新しい `gas/Code.gs` の中身に貼り替えて保存（トリガーはそのままでよい）。貼り替えるまでは前の表に書くが、アプリが開いたときに写すので消えない。
 4. 設定 → **目標** で、返済の目標（毎月の額・臨時の返済）と積立の目標を確かめる。
 5. メニュー → **口座と財布** で、口座と財布の本当の残高を入れて直す。
+
+## Claude が読めるようにする（Google ドライブ）
+
+形式は [docs/OPS.md](docs/OPS.md)。
+
+1. Supabase の SQL Editor で `supabase/migrations/0006_snapshots.sql` を貼って **Run**。
+2. GAS の `コード.gs` を新しい `gas/Code.gs` に貼り替えて保存。
+3. 関数 **setup** を選んで **実行**。Google ドライブを使う許可を求められるので許可する（15分ごとの取り込みと、1時間ごとのドライブへの書き出しのトリガーができる）。
+4. アプリを一度開く（開くたびに書き出しを保存する）。数分後、Google ドライブに「Gholdengo/gholdengo-snapshot.json」ができる。
+5. Claude で Google ドライブをつなぐと、いつでも読める。Claude が作った変更（gholdengo-ops-v1）は、アプリの「設定 → データ → Claude との相談を取り込む」で中身を確かめてから実行する。
 
 ## 開発
 

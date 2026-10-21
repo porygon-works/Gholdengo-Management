@@ -153,6 +153,7 @@ Gmail ──(15分ごと)── GAS ──→ Supabase ←──→ Webアプリ
 | `rules` | お店→費目のルール |
 | `settings` | カード・給料日・費目（大費目つき）・安全残高など |
 | `review` | 要確認 |
+| `snapshots` | Claude が読むための書き出し（まとめ＋元のデータ。1人1行）。アプリが開くたびに保存し、GAS が1時間に1回 Google ドライブに置く。形式は docs/OPS.md |
 
 ### 3.7 取り込み（GAS）
 
