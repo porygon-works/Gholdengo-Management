@@ -115,6 +115,7 @@ function CarryLine({ data, month }: { data: AppData; month: string }) {
           {row("− まだ引き落とされていないクレカ（前の月までに使った分）", c.owed)}
           {c.saved !== 0 && row("− 積立にたまった額（口座に置いたまま）", c.saved)}
           {c.safety !== 0 && row("− 安全残高", c.safety)}
+          {c.receivable !== 0 && row("＋ まだ返ってきていない立替", c.receivable)}
           <tr><td>＝ 前の月の終わりの残り</td><td className="num">{signed(c.left)}</td></tr>
           {row(`− いつもの残り（始めた ${ymLabel(c.baseYm)} の初めの残り）`, c.base)}
         </tbody>

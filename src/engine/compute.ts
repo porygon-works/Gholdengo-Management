@@ -371,21 +371,41 @@ export interface Carry {
   bank: number; // その日の口座（見込み）。財布は数えない
   owed: number; // まだ口座から出ていない、前の月までのクレカ利用
   saved: number; // 積立にたまった額
+  receivable: number; // まだ返ってきていない立替（始めた月から。返ってくるお金なので残りに足す）
   safety: number; // 安全残高
-  left: number; // 前の月の終わりの残り ＝ 口座 − クレカ − 積立 − 安全残高
+  left: number; // 前の月の終わりの残り ＝ 口座 − クレカ − 積立 − 安全残高 ＋ まだ返ってきていない立替
   base: number; // 始めた月（carryFrom）の残り。いつもの状態として、ここからの増減だけを繰り越す
   baseYm: string; // 始めた月
   raw: number; // 繰越 ＝ left − base（始めた月は0）
 }
 
-/** ym の月の初めの「前の月の終わりの残り」（口座 − 前の月までのクレカ − 積立 − 安全残高）。残高の記録がなければ null */
+/**
+ * 始めた月（carryFrom）から ym の月の前までに立て替えて、まだ返ってきていない額 ＝ 立替の合計 − 立替の返金の合計（0より小さくしない）。
+ * クレカ明細の立替（一部の立替を含む）と口座明細の立替の出金を足し、口座明細の立替の返金を引く。
+ * 立て替えたクレカの引き落としは返金より先に来るので、これを足さないと、返ってくるまでの月だけ繰越が少なく出る
+ */
+export function receivableBefore(d: Data, ym: string): number {
+  const from = d.settings.carryFrom;
+  if (!from) return 0;
+  const inRange = (date: string) => ymOf(date) >= from && ymOf(date) < ym;
+  let sum = 0;
+  for (const e of d.cards) if (isLive(e) && inRange(e.date)) sum += e.group === "tatekae" ? e.amount : e.group === "variable" || e.group === "fixed" ? e.tatekae || 0 : 0;
+  for (const e of d.accounts) {
+    if (!inRange(e.date)) continue;
+    if (e.direction === "out" && e.group === "tatekae") sum += e.amount;
+    if (e.direction === "in" && e.group === "refund") sum -= e.amount;
+  }
+  return Math.max(0, sum);
+}
+
+/** ym の月の初めの「前の月の終わりの残り」（口座 − 前の月までのクレカ − 積立 − 安全残高 ＋ まだ返ってきていない立替）。残高の記録がなければ null */
 function leftBefore(d: Data, ym: string) {
   const prev = addMonths(ym, -1);
   const end = dayOf(prev, 31);
   const at = balanceAt(d, end);
   if (!at) return null;
-  const owed = cardOwedFrom(d, ym), saved = savedBy(d, prev);
-  return { end, bank: at.bank, owed, saved, left: at.bank - owed - saved - d.settings.safety };
+  const owed = cardOwedFrom(d, ym), saved = savedBy(d, prev), receivable = receivableBefore(d, ym);
+  return { end, bank: at.bank, owed, saved, receivable, left: at.bank - owed - saved - d.settings.safety + receivable };
 }
 
 /**
