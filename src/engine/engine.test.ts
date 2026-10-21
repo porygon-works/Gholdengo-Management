@@ -383,23 +383,29 @@ describe("前月からの繰越（§5.8）と、使えるお金から決める�
     ],
     ...p,
   });
-  it("繰越 ＝ 口座 − 前の月までのクレカ − 積立 − 安全残高（財布は数えない）", () => {
+  it("残り ＝ 口座 − 前の月までのクレカ − 積立 − 安全残高（財布は数えない）。始めた月の残りを「いつもの残り」にして、繰越は0", () => {
     const c = carryFor(base(), "2026-11")!;
-    expect([c.bank, c.owed, c.saved, c.raw]).toEqual([250000, 71000, 70000, 99000]);
+    expect([c.bank, c.owed, c.saved, c.left, c.base, c.raw]).toEqual([250000, 71000, 70000, 99000, 99000, 0]);
     expect(carryFor(base(), "2026-10")).toBeNull();
+  });
+  it("次の月からは、いつもの残りからの増減を繰り越す", () => {
+    // 11月：給与 200,000、セゾンの引落 75,000（10月の家賃と分割）、三井の引落 1,000、11月にカードで使った 2,000（12月に引落）、積立 20,000
+    const c = carryFor(base(), "2026-12")!;
+    expect([c.bank, c.owed, c.saved, c.left, c.base, c.raw]).toEqual([374000, 2000, 90000, 272000, 99000, 173000]);
   });
   it("使えるお金 ＝ 給与 ＋ 追加予算 ＋ 繰越 − 固定費 − 目標用マイナス。予算は決めた額、なければ初めの値", () => {
     const b = monthBase(base(), "2026-11");
-    expect([b.carry, b.goal, b.available, b.input, b.budgetManual, b.T]).toEqual([99000, 20000, 200000 + 99000 - b.fixed - 20000, true, false, 90000]);
+    expect([b.carry, b.goal, b.available, b.input, b.budgetManual, b.T]).toEqual([0, 20000, 200000 - b.fixed - 20000, true, false, 90000]);
     const set = monthBase(base({ budgets: [{ month: "2026-11", category: BUDGET_KEY, amount: 120000 }] }), "2026-11");
     expect([set.budgetManual, set.T]).toEqual([true, 120000]);
     // 始める月より前は、使えるお金がそのまま予算
     const old = monthBase(base(), "2026-10");
     expect([old.input, old.T]).toEqual([false, old.available]);
   });
-  it("マイナスの繰越は使えるお金から引く", () => {
-    const c = carryFor(base({ settings: { ...s, safety: 300000 } }), "2026-11")!;
-    expect(c.raw).toBe(-191000);
+  it("いつもの残りより減ったら、マイナスの繰越として使えるお金から引く", () => {
+    const d = base();
+    const c = carryFor({ ...d, accounts: [...d.accounts, A({ date: "2026-11-20", amount: 300000 })] }, "2026-12")!;
+    expect(c.raw).toBe(173000 - 300000);
   });
   it("前の月より前に残高の記録がなければ、あとの記録から戻して出す", () => {
     const later = base({ balances: [bal({ date: "2026-11-05", bank: 240000, cash: 10000 })], accounts: [A({ date: "2026-11-03", amount: 10000 })] });
