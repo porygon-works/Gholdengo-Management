@@ -419,7 +419,7 @@ describe("カード2枚と引き落とし", () => {
     expect([n.cardFixed, n.directFixed, n.cardVar, n.repay, n.other]).toEqual([70000, 30000, 7000, 10000, 0]);
     expect(n.total).toBe(117000);
   });
-  it("口座の今後の動き：今月これからの引き落としと、次の給料日の前日に残る額", () => {
+  it("口座の今後の動き：報告日より後の入金を足し、引き落としを引いて、次の給料日の前日に残る額を出す（給与は入れない）", () => {
     const d = D({
       balances: [{ id: "b", date: "2026-10-19", bank: 300000, cash: 10000, paypay: 0, memo: "" }],
       entries: [
@@ -428,12 +428,19 @@ describe("カード2枚と引き落とし", () => {
         E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-10-10" }),
         E({ method: "card", card: "saison", category: "家賃", amount: 70000, date: "2026-10-27", status: "plan" }),
         E({ method: "bank", category: "保険・共済", amount: 2000, date: "2026-11-20", status: "plan" }),
+        E({ kind: "income", method: "bank", category: null, item: "売却代金", amount: 40000, date: "2026-10-20" }),
+        E({ kind: "income", method: "bank", category: "給与", item: "給与", amount: 250000, date: "2026-11-16", status: "plan" }),
       ],
     });
     expect(nextPayday(S, "2026-10-21")).toBe("2026-11-16");
     expect(nextPayday(S, "2026-10-14")).toBe("2026-10-15");
     const x = balanceAfterDebits(d, "2026-10-21")!;
-    expect([x.now, x.thisMonth, x.afterThisMonth]).toEqual([310000, 80000, 230000]);
-    expect([x.nextBeforePay, x.beforePayday]).toEqual([70000, 160000]);
+    expect([x.now, x.afterThisMonth, x.beforePayday]).toEqual([310000, 270000, 200000]);
+    expect(x.rows.map((r) => [r.date, r.label, r.delta, r.balance])).toEqual([
+      ["2026-10-20", "売却代金（入金）", 40000, 350000],
+      ["2026-10-26", "三井のクレカの請求（9月分）", -50000, 300000],
+      ["2026-10-27", "奨学金", -30000, 270000],
+      ["2026-11-04", "セゾンのクレカの請求（10月分）", -70000, 200000],
+    ]);
   });
 });

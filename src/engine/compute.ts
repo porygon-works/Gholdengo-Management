@@ -531,23 +531,43 @@ export function nextPayday(s: Settings, today: string): string {
   return p > today ? p : shiftBusiness(dayOf(addMonths(ym, 1), s.payday), "next");
 }
 
+export interface FlowRow { date: string; label: string; delta: number; balance: number; state: "予定" | "見込み" | "確定" }
+
 /**
- * いまの口座残高から、引き落としを引いて残る額（§5.9）。
- * - 今月の引き落としのうち、残高の報告日より後のもの
- * - 次の給料日の前日までの引き落とし（来月の家賃なども入る）
- * 給与などの入金と、現金・PayPay で使う分は入れない
+ * 口座の今後の動き（§5.9）。いまの残高から、報告日より後〜次の給料日の前日の入金と引き落としを日付の順に並べ、残高を出す。
+ * - カードは1枚ごとに1行（請求額。リボ・分割の返済を含む）。口座からの直接の引き落とし・入金は1件ずつ
+ * - 給与は給料日に入るので、ここには入らない。現金・PayPay で使う分は入れない
  */
 export function balanceAfterDebits(d: Data, today: string) {
   const bal = latestBalance(d.balances);
   if (!bal) return null;
+  const s = d.settings;
   const now = balanceTotal(bal);
-  const payday = nextPayday(d.settings, today);
+  const payday = nextPayday(s, today);
   const cur = ymOf(today);
-  const lines = [...debitLines(debitsFor(d, cur)), ...debitLines(debitsFor(d, addMonths(cur, 1)))].filter((l) => l.date > bal.date);
-  const thisMonth = lines.filter((l) => ymOf(l.date) === cur).reduce((a, l) => a + l.amount, 0);
-  const untilPay = lines.filter((l) => l.date < payday);
-  const beforePay = untilPay.reduce((a, l) => a + l.amount, 0);
-  // 来月に入ってから給料日の前日までの分（来月の家賃など）
-  const nextBeforePay = untilPay.filter((l) => ymOf(l.date) !== cur).reduce((a, l) => a + l.amount, 0);
-  return { bal, now, thisMonth, afterThisMonth: now - thisMonth, payday, untilPay, nextBeforePay, beforePayday: now - beforePay };
+  const moves: Omit<FlowRow, "balance">[] = [];
+  for (const ym of [cur, addMonths(cur, 1)]) {
+    const x = debitsFor(d, ym);
+    for (const e of x.direct) moves.push({ date: e.date, label: e.item || e.shop || e.category || "引き落とし", delta: -e.amount, state: e.status === "plan" ? "予定" : "確定" });
+    for (const c of x.cards) {
+      if (!c.amount) continue;
+      const repay = c.repays.length ? "・リボ返済を含む" : "";
+      moves.push({ date: c.date, label: `${c.card.name}のクレカの請求（${+c.closingYm.slice(5)}月分${repay}）`, delta: -c.amount, state: c.bill != null ? "確定" : "見込み" });
+    }
+  }
+  for (const e of d.entries) {
+    if (!isLive(e) || e.kind !== "income" || !cashDate(e, s)) continue;
+    moves.push({ date: e.date, label: `${e.item || "入金"}（入金）`, delta: e.amount, state: e.status === "plan" ? "予定" : "確定" });
+  }
+  // 報告日より後で、今月中か次の給料日の前日まで。同じ日は入金を先に
+  const inRange = moves.filter((m) => m.date > bal.date && (ymOf(m.date) === cur || m.date < payday));
+  inRange.sort((a, b) => a.date.localeCompare(b.date) || b.delta - a.delta);
+  let v = now;
+  const rows: FlowRow[] = inRange.map((m) => ({ ...m, balance: (v += m.delta) }));
+  const until = (pred: (r: FlowRow) => boolean) => rows.filter(pred).reduce((a, r) => a + r.delta, now);
+  return {
+    bal, now, payday, rows,
+    afterThisMonth: until((r) => ymOf(r.date) === cur),
+    beforePayday: until((r) => r.date < payday),
+  };
 }
