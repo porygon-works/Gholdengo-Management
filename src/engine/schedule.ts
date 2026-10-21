@@ -32,6 +32,17 @@ export function recurringDate(r: Recurring, ym: string): string {
 
 export const recurringRef = (r: Recurring, ym: string) => `rec:${r.id}:${ym}`;
 
+/** 定期のお金が ym の月にあるか（期間の中で、何か月ごとの月にあたるか） */
+export function recurringDue(r: Recurring, ym: string): boolean {
+  if (!r.active) return false;
+  if (r.start_month && ym < r.start_month) return false;
+  if (r.end_month && ym > r.end_month) return false;
+  const every = Math.max(1, r.every || 1);
+  if (every === 1) return true;
+  const [y0, m0] = (r.start_month ?? ym).split("-").map(Number), [y, m] = ym.split("-").map(Number);
+  return ((y - y0) * 12 + (m - m0)) % every === 0;
+}
+
 /** 定期のお金の大費目。指定がなければ費目から決める */
 function groupOf(r: Recurring, s: Settings): AccountGroup | CardGroup {
   if (r.group) return r.group;
@@ -39,15 +50,14 @@ function groupOf(r: Recurring, s: Settings): AccountGroup | CardGroup {
 }
 
 /** months の各月について、まだ作られていない定期の予定を、口座明細とクレカ明細に分けて返す */
-export function missingRecurring(d: { recurring: Recurring[]; accounts: AccountEntry[]; cards: CardEntry[]; settings: Settings }, months: string[]) {
-  const have = new Set([...d.accounts, ...d.cards].map((e) => e.source_ref).filter(Boolean));
+export function missingRecurring(d: { recurring: Recurring[]; accounts: AccountEntry[]; cards: CardEntry[]; settings: Settings; removedRefs?: string[] }, months: string[]) {
+  const have = new Set([...d.accounts, ...d.cards].map((e) => e.source_ref).filter(Boolean).concat(d.removedRefs ?? []));
   const accounts: Omit<AccountEntry, "id">[] = [];
   const cards: Omit<CardEntry, "id">[] = [];
   for (const r of d.recurring) {
     if (!r.active) continue;
     for (const ym of months) {
-      if (r.start_month && ym < r.start_month) continue;
-      if (r.end_month && ym > r.end_month) continue;
+      if (!recurringDue(r, ym)) continue;
       const ref = recurringRef(r, ym);
       if (have.has(ref)) continue;
       const date = recurringDate(r, ym);

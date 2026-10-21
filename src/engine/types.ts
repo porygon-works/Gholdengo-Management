@@ -87,6 +87,7 @@ export interface Recurring {
   pay: Account | "card"; // 口座・財布・クレカ
   card: string | null; // クレカのとき、どのカードか。null は1枚目
   shop: string; // お店の名前のヒント（クレカの明細とまとめるため）
+  every: number; // 何か月ごとか（1 = 毎月、2 = 隔月、12 = 毎年）。start_month の月から数える
   start_month: string | null; // YYYY-MM
   end_month: string | null;
   active: boolean;
@@ -186,4 +187,6 @@ export interface Data {
   budgets: Budget[];
   rules: Rule[];
   settings: Settings;
+  /** 消した明細の source_ref（メールの取り込みや予定づくりで、また作らないため） */
+  removedRefs?: string[];
 }

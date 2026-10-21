@@ -99,7 +99,7 @@ export function recurringFromRow(r: Row, s: Settings): Recurring {
   const pay = r.group ? ((r.pay as Recurring["pay"]) || "bank") : method === "card" || method === "revo" ? "card" : method === "cash" || method === "ic" ? "wallet" : "bank";
   return {
     id: str(r.id), name: str(r.name), kind, group, category: kind === "income" || group === "installment" || group === "other" ? null : category, amount: num(r.amount),
-    day: num(r.day) || 1, shift: (r.shift as Recurring["shift"]) || "next", pay, card: (r.card as string) || null, shop: str(r.shop),
+    day: num(r.day) || 1, shift: (r.shift as Recurring["shift"]) || "next", pay, every: Math.max(1, num(r.every) || 1), card: (r.card as string) || null, shop: str(r.shop),
     start_month: (r.start_month as string) || null, end_month: (r.end_month as string) || null, active: r.active !== false,
   };
 }

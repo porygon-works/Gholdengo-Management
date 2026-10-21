@@ -161,3 +161,8 @@ pre.mail { white-space: pre-wrap; font-size: 12px; background: var(--sunk); padd
 .kindctl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .kindctl select { width: auto; min-width: 7em; }
 .kindctl .btn { margin-left: auto; }
+/* 金額は折り返さない。列の多い表は文字を少し小さく */
+.tbl td.num, .tbl th { white-space: nowrap; }
+.tbl.wide { font-size: 12.5px; }
+.tbl.wide td, .tbl.wide th { padding-left: 4px; padding-right: 4px; }
+.tbl.wide td:first-child { min-width: 4.5em; }

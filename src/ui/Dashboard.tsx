@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ACCOUNT_GROUP_LABEL, accountFlow, addDays, addMonths, budgetCats, computeMonth, groupOfCat, nextPayments, PAY_GROUP_LABEL, RESERVE, ymOf, type AccountEntry, type PayGroup } from "../engine";
 import type { Open } from "./Sheets";
 import { actions, type AppData, type Store } from "../data/store";
-import { accountTitle, Bar, cardOfPay, Chip, Field, md, money, NumInput, payLabels, payOptions, Select, Sheet, Spent, toast, yen, ymLabel, type Pay } from "./common";
+import { accountTitle, Bar, cardOfPay, Chip, Field, md, money, NumInput, payLabels, payOptions, Select, Sheet, toast, yen, ymLabel, type Pay } from "./common";
 
 interface Props {
   store: Store;
@@ -81,7 +81,8 @@ function total(rs: Row[], daily: boolean, fixed = false) {
     <tr className="sum">
       <td>合計</td>
       <td className="num">{money(sum((r) => r.budget))}</td>
-      <td className="num"><Spent used={sum((r) => r.used)} planned={sum((r) => r.planned)} /></td>
+      <td className="num">{money(sum((r) => r.used))}</td>
+      <td className="num">{money(sum((r) => r.planned))}</td>
       <td className={`num ${rem < 0 ? "neg" : ""}`}>{fixed ? money(sum((r) => Math.max(0, r.budget - r.used))) : money(rem)}</td>
       {daily && <td />}
     </tr>
@@ -195,7 +196,7 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
           <div className="kpi">
             <div className="lb">{label}</div>
             <div className="v num">{money(v.T)}</div>
-            <div className="note">変動費 {money(v.U + v.P)}{v.P ? `（${yen(v.P)}）` : ""}{v.P ? "・（）内は予定" : ""}</div>
+            <div className="note">変動費 使った {money(v.U)}・予定 {money(v.P)}</div>
           </div>
           <div className={`kpi ${v.R < 0 ? "bad" : "main"}`}>
             <div className="lb">残り予算</div>
@@ -235,16 +236,17 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
       )}
 
       <section>
-        <h2>{ACCOUNT_GROUP_LABEL.variable} <small>（）内は予定・タップで明細</small></h2>
+        <h2>{ACCOUNT_GROUP_LABEL.variable} <small>タップで明細</small></h2>
         <div className="panel scroll">
-          <table className="tbl">
-            <thead><tr><th>費目</th><th>予算</th><th>使った</th><th>残り</th>{v.when !== "past" && <th>1日あたり</th>}</tr></thead>
+          <table className="tbl wide">
+            <thead><tr><th>費目</th><th>予算</th><th>使った</th><th>予定</th><th>残り</th>{v.when !== "past" && <th>1日あたり</th>}</tr></thead>
             <tbody>
               {rows.filter((r) => !r.fixed).map((r) => (
                 <tr key={r.cat} className="tap" onClick={() => go("ledger", r.cat)}>
                   <td>{r.cat}{r.unclassified > 0 && <> <Chip kind="warn">未分類 {yen(r.unclassified)}</Chip></>}</td>
                   <td className="num">{money(r.budget)}</td>
-                  <td className="num"><Spent used={r.used} planned={r.planned} /></td>
+                  <td className="num">{money(r.used)}</td>
+                  <td className="num">{r.planned ? money(r.planned) : "―"}</td>
                   <td className={`num ${r.rem < 0 ? "neg" : ""}`}>{money(r.rem)}</td>
                   {v.when !== "past" && <td className="num"><b>{r.daily == null ? "―" : money(r.daily)}</b></td>}
                 </tr>
@@ -257,16 +259,17 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
       </section>
 
       <section>
-        <h2>{ACCOUNT_GROUP_LABEL.fixed} <small>（）内は予定・見込みを給与から引いてある</small></h2>
+        <h2>{ACCOUNT_GROUP_LABEL.fixed} <small>見込みを給与から引いてある・タップで明細</small></h2>
         <div className="panel scroll">
-          <table className="tbl">
-            <thead><tr><th>費目</th><th>見込み</th><th>使った</th><th>これから</th></tr></thead>
+          <table className="tbl wide">
+            <thead><tr><th>費目</th><th>見込み</th><th>使った</th><th>予定</th><th>これから</th></tr></thead>
             <tbody>
               {rows.filter((r) => r.fixed).map((r) => (
                 <tr key={r.cat} className="tap" onClick={() => go("ledger", r.cat)}>
                   <td>{r.cat}</td>
                   <td className="num">{money(r.budget)}</td>
-                  <td className="num"><Spent used={r.used} planned={r.planned} /></td>
+                  <td className="num">{money(r.used)}</td>
+                  <td className="num">{r.planned ? money(r.planned) : "―"}</td>
                   <td className={`num ${r.rem < 0 ? "neg" : ""}`}>{r.rem < 0 ? `超過 ${money(-r.rem)}` : money(Math.max(0, r.budget - r.used))}</td>
                 </tr>
               ))}
