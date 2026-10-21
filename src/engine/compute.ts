@@ -1,4 +1,4 @@
-import { addDays, addMonths, daysBetween, lastDay, ymOf } from "./dates";
+import { addDays, addMonths, dayOf, daysBetween, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
 import { cardOf, cardPayDate, cashDate, closingMonth, ownCost } from "./schedule";
 import { BASE_KEYS, budgetCats, INCOME_EXTRA, INCOME_SALARY, isFixedCat, nonBudgetCats, REPAY, RESERVE, type Balance, type BaseField, type BaseKey, type CardDef, type Data, type Entry, type Settings } from "./types";
@@ -473,9 +473,81 @@ export function debitsFor(d: Data, ym: string): Debits {
   return { direct, directSum, cards, total: directSum + cards.reduce((a, c) => a + c.amount, 0) };
 }
 
-/** 来月の支払い予定（§5.8）：固定費の見込み ＋ 変動費（来月の予算）＋ リボ・分割の返済 */
-export function nextMonthSpend(d: Data, ym: string): { ym: string; fixed: number; variable: number; repay: number; total: number } {
-  const b = monthBase(d, ym);
-  const variable = Math.max(0, b.T);
-  return { ym, fixed: b.fixed, variable, repay: b.repay, total: b.fixed + variable + b.repay };
+export interface DebitLine { key: string; date: string; label: string; amount: number; state: "予定" | "見込み" | "確定"; card?: CardDebit }
+
+/** 引き落としを1行ずつにする。カードは「使った分」とリボ・分割の返済を分ける。請求額が確定したら、使った分 ＝ 請求額 − 返済 */
+export function debitLines(x: Debits): DebitLine[] {
+  const title = (e: Entry) => e.item || e.shop || "支出";
+  const out: DebitLine[] = x.direct.map((e) => ({ key: e.id, date: e.date, label: title(e), amount: e.amount, state: e.status === "plan" ? "予定" : "確定" }));
+  for (const c of x.cards) {
+    const repay = c.repays.reduce((a, e) => a + e.amount, 0);
+    const used = c.bill != null ? Math.max(0, c.bill - repay) : c.items.reduce((a, e) => a + e.amount, 0);
+    out.push({ key: c.card.id, date: c.date, label: `${c.card.name}（${+c.closingYm.slice(5)}月分）`, amount: used, state: c.bill != null ? "確定" : "見込み", card: c });
+    for (const e of c.repays) out.push({ key: e.id, date: c.date, label: title(e), amount: e.amount, state: c.bill != null || e.status !== "plan" ? "確定" : "予定" });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export interface NextDebits {
+  ym: string;
+  cardFixed: number; // 固定費：カードで払う分（今月使う家賃など。来月引き落とし）
+  directFixed: number; // 固定費：口座から直接（奨学金など）
+  cardVar: number; // 変動費：カードで払う分（今月の使った＋予定。来月引き落とし）
+  repay: number; // リボ・分割の返済
+  other: number; // そのほか（予算外など）
+  total: number; // ＝ その月の引き落としの合計（§5.7）
+}
+
+/**
+ * 来月の支払い予定（§5.8）：来月に口座から出る引き落としを、固定費／変動費／返済に分けたもの。
+ * カードの分は今月の利用（予定を含む）。請求額が確定していれば、使った分を請求額に合わせて変動費で調整する。
+ */
+export function nextMonthDebits(d: Data, ym: string): NextDebits {
+  const s = d.settings;
+  const x = debitsFor(d, ym);
+  const kindOf = (e: Entry) => (e.category === REPAY ? "repay" : e.category && isFixedCat(s, e.category) ? "fixed" : !e.category || s.varCats.includes(e.category) ? "var" : "other");
+  const r = { ym, cardFixed: 0, directFixed: 0, cardVar: 0, repay: 0, other: 0, total: x.total };
+  for (const e of x.direct) {
+    const k = kindOf(e);
+    if (k === "fixed") r.directFixed += e.amount; else if (k === "repay") r.repay += e.amount; else r.other += e.amount;
+  }
+  for (const c of x.cards) {
+    let used = 0;
+    for (const e of c.items) {
+      const k = kindOf(e);
+      if (k === "fixed") r.cardFixed += e.amount; else if (k === "var") r.cardVar += e.amount; else r.other += e.amount;
+      used += e.amount;
+    }
+    r.repay += c.repays.reduce((a, e) => a + e.amount, 0);
+    if (c.bill != null) r.cardVar += c.amount - c.estimate; // 請求額との差
+  }
+  return r;
+}
+
+/** 今日より後で、いちばん近い給料日（給料日が土日祝なら後の平日） */
+export function nextPayday(s: Settings, today: string): string {
+  const ym = ymOf(today);
+  const p = shiftBusiness(dayOf(ym, s.payday), "next");
+  return p > today ? p : shiftBusiness(dayOf(addMonths(ym, 1), s.payday), "next");
+}
+
+/**
+ * いまの口座残高から、引き落としを引いて残る額（§5.9）。
+ * - 今月の引き落としのうち、残高の報告日より後のもの
+ * - 次の給料日の前日までの引き落とし（来月の家賃なども入る）
+ * 給与などの入金と、現金・PayPay で使う分は入れない
+ */
+export function balanceAfterDebits(d: Data, today: string) {
+  const bal = latestBalance(d.balances);
+  if (!bal) return null;
+  const now = balanceTotal(bal);
+  const payday = nextPayday(d.settings, today);
+  const cur = ymOf(today);
+  const lines = [...debitLines(debitsFor(d, cur)), ...debitLines(debitsFor(d, addMonths(cur, 1)))].filter((l) => l.date > bal.date);
+  const thisMonth = lines.filter((l) => ymOf(l.date) === cur).reduce((a, l) => a + l.amount, 0);
+  const untilPay = lines.filter((l) => l.date < payday);
+  const beforePay = untilPay.reduce((a, l) => a + l.amount, 0);
+  // 来月に入ってから給料日の前日までの分（来月の家賃など）
+  const nextBeforePay = untilPay.filter((l) => ymOf(l.date) !== cur).reduce((a, l) => a + l.amount, 0);
+  return { bal, now, thisMonth, afterThisMonth: now - thisMonth, payday, untilPay, nextBeforePay, beforePayday: now - beforePay };
 }

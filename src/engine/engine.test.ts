@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  assetAt, budgetsFor, cardPayDate, debitsFor, nextMonthSpend, cashLimit, dipBefore, goalPlan, monthBase, monthlyFor, planGoals, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
+  assetAt, budgetsFor, cardPayDate, debitsFor, nextMonthDebits, nextPayday, balanceAfterDebits, cashLimit, dipBefore, goalPlan, monthBase, monthlyFor, planGoals, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
   isBusinessDay, missingRecurring, normalizeShop, projection, recurringDate, ruleFor, shiftBusiness, type Data, type Entry, type Recurring,
 } from "./index";
 
@@ -404,16 +404,36 @@ describe("カード2枚と引き落とし", () => {
     const y = debitsFor({ ...d, cardBills: [{ id: "b", card: "smbc", pay_date: "2026-11-26", amount: 8500 }] }, "2026-11");
     expect([y.cards[0].bill, y.cards[0].amount, y.total]).toEqual([8500, 8500, 30000 + 8500 + 80000]);
   });
-  it("来月の支払い予定：固定費の見込み＋変動費（来月の予算）＋リボ・分割", () => {
+  it("来月の支払い予定：来月の引き落としを、カードの固定費・直接の固定費・カードの変動費・返済に分ける", () => {
     const d = D({
-      budgets: [{ month: "2026-11", category: "家賃", amount: 70000 }],
       entries: [
-        E({ kind: "income", method: "bank", category: "給与", amount: 250000, date: "2026-11-16", status: "plan" }),
+        E({ method: "card", card: "saison", category: "家賃", amount: 70000, date: "2026-10-27", status: "plan" }),
+        E({ method: "card", category: "食料品", amount: 4000, date: "2026-10-10" }),
+        E({ method: "card", category: "外食", amount: 3000, date: "2026-10-30", status: "plan" }),
+        E({ method: "cash", category: "外食", amount: 900, date: "2026-10-11" }),
+        E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-11-27", status: "plan" }),
         E({ method: "card", card: "saison", category: "返済", amount: 10000, date: "2026-11-04", status: "plan" }),
       ],
     });
-    const n = nextMonthSpend(d, "2026-11");
-    expect([n.fixed, n.repay, n.variable]).toEqual([70000, 10000, 250000 - 70000 - 10000]);
-    expect(n.total).toBe(250000);
+    const n = nextMonthDebits(d, "2026-11");
+    expect([n.cardFixed, n.directFixed, n.cardVar, n.repay, n.other]).toEqual([70000, 30000, 7000, 10000, 0]);
+    expect(n.total).toBe(117000);
+  });
+  it("口座の今後の動き：今月これからの引き落としと、次の給料日の前日に残る額", () => {
+    const d = D({
+      balances: [{ id: "b", date: "2026-10-19", bank: 300000, cash: 10000, paypay: 0, memo: "" }],
+      entries: [
+        E({ method: "card", amount: 50000, date: "2026-09-10" }),
+        E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-10-27", status: "plan" }),
+        E({ method: "bank", category: "奨学金", amount: 30000, date: "2026-10-10" }),
+        E({ method: "card", card: "saison", category: "家賃", amount: 70000, date: "2026-10-27", status: "plan" }),
+        E({ method: "bank", category: "保険・共済", amount: 2000, date: "2026-11-20", status: "plan" }),
+      ],
+    });
+    expect(nextPayday(S, "2026-10-21")).toBe("2026-11-16");
+    expect(nextPayday(S, "2026-10-14")).toBe("2026-10-15");
+    const x = balanceAfterDebits(d, "2026-10-21")!;
+    expect([x.now, x.thisMonth, x.afterThisMonth]).toEqual([310000, 80000, 230000]);
+    expect([x.nextBeforePay, x.beforePayday]).toEqual([70000, 160000]);
   });
 });
