@@ -4,6 +4,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // entries・card_bills・debts は前の版（v2）の表。新しい表（account_entries・card_entries・goals）へ写すために読む
 export type Table = "account_entries" | "card_entries" | "goals" | "entries" | "balances" | "card_bills" | "recurring" | "budgets" | "rules" | "debts" | "settings" | "review";
+/** 書くだけで読まない表（Claude が読むための書き出し） */
+export type WriteOnly = "snapshots";
 export const TABLES: Table[] = ["account_entries", "card_entries", "goals", "entries", "balances", "card_bills", "recurring", "budgets", "rules", "debts", "settings", "review"];
 
 export type Row = Record<string, unknown>;
@@ -16,8 +18,8 @@ export interface Backend {
   insert(t: Table, rows: Row[], opts?: { onConflict?: string; merge?: boolean }): Promise<void>;
   update(t: Table, id: string, patch: Row): Promise<void>;
   remove(t: Table, id: string): Promise<void>;
-  /** budgets と settings のように id のない表の書き込み */
-  upsertKeyed(t: "budgets" | "settings", rows: Row[]): Promise<void>;
+  /** budgets・settings・snapshots のように id のない表の書き込み */
+  upsertKeyed(t: "budgets" | "settings" | WriteOnly, rows: Row[]): Promise<void>;
   removeBudget(month: string, category: string): Promise<void>;
 }
 
@@ -120,6 +122,7 @@ function localBackend(): Backend {
     },
     async upsertKeyed(t, rows) {
       const d = readLocal();
+      if (t === "snapshots") { (d as unknown as Record<string, Row[]>).snapshots = rows.slice(-1); writeLocal(d); return; }
       for (const r of rows) {
         const i = t === "budgets" ? d.budgets.findIndex((x) => x.month === r.month && x.category === r.category) : 0;
         if (t === "settings") d.settings = [{ ...(d.settings[0] || {}), ...r }];

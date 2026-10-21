@@ -6,6 +6,8 @@ import {
 import { actions, type AppData, type ImportFile, type Store } from "../data/store";
 import { backend, resetLocal } from "../data/backend";
 import { VERSION_LABEL } from "./version";
+import { applyOps, planOps } from "../data/ops";
+import { snapshot } from "../data/snapshot";
 import type { Open } from "./Sheets";
 import { Chip, Field, md, money, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
 
@@ -549,6 +551,47 @@ function Kinds({ store, data }: { store: Store; data: AppData }) {
 
 // ---------- データ ----------
 
+/** Claude との相談を取り込む（gholdengo-ops-v1）。変わる内容を見せて、実行を押したときだけ書く */
+function OpsImport({ store, data }: { store: Store; data: AppData }) {
+  const [plan, setPlan] = useState<ReturnType<typeof planOps> | null>(null);
+  const [text, setText] = useState("");
+  const read = (raw: string) => {
+    let json: unknown;
+    try { json = JSON.parse(raw); } catch { toast("JSON として読めませんでした"); return; }
+    setPlan(planOps(data, json));
+  };
+  const run = async () => {
+    if (!plan || plan.errors.length || !plan.changes.length) return;
+    if (await store.run(() => applyOps(data, plan.changes, todayJST()))) { toast(`${plan.changes.length}件を取り込みました`); setPlan(null); setText(""); }
+  };
+  return (
+    <section>
+      <h2>Claude との相談を取り込む <small>gholdengo-ops-v1（docs/OPS.md）</small></h2>
+      <div className="panel">
+        <div className="note">Claude が作った JSON を、ファイルか、下に貼りつけて読み込みます。変わる内容を確かめてから「実行」を押してください。</div>
+        <Field label="ファイル"><input type="file" accept="application/json,.json" onChange={async (e) => { const f = e.target.files?.[0]; if (f) read(await f.text()); }} /></Field>
+        <Field label="または貼りつける"><textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder='{"format": "gholdengo-ops-v1", "ops": [...]}' /></Field>
+        <div className="btns"><button className="btn ghost" onClick={() => text.trim() && read(text)}>読み込む</button></div>
+        {plan && (
+          <>
+            {plan.note && <div className="note">メモ：{plan.note}</div>}
+            {plan.errors.length > 0 && <div className="alert bad">読めないところがあるので取り込みません：<ul>{plan.errors.map((e, i) => <li key={i}>{e}</li>)}</ul></div>}
+            {plan.changes.length > 0 && (
+              <table className="tbl"><tbody>{plan.changes.map((c, i) => (
+                <tr key={i}><td style={{ textAlign: "left" }}><Chip kind={c.kind === "delete" ? "bad" : c.kind === "add" ? "ok" : "warn"}>{c.kind === "delete" ? "消す" : c.kind === "add" ? "足す" : "直す"}</Chip> {c.label}</td></tr>
+              ))}</tbody></table>
+            )}
+            <div className="btns">
+              <button className="btn" disabled={!!plan.errors.length || !plan.changes.length} onClick={run}>実行（{plan.changes.length}件）</button>
+              <button className="btn ghost" onClick={() => setPlan(null)}>やめる</button>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function DataTab({ store, data }: { store: Store; data: AppData }) {
   const [msg, setMsg] = useState("");
   const importFile = async (f: File | undefined) => {
@@ -560,7 +603,7 @@ function DataTab({ store, data }: { store: Store; data: AppData }) {
     if (await store.run(async () => { result = await actions.importJson(data, json); })) { setMsg(result); toast("取り込みました"); }
   };
   const download = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(snapshot(data, todayJST()), null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `gholdengo-${todayJST()}.json`;
@@ -568,13 +611,16 @@ function DataTab({ store, data }: { store: Store; data: AppData }) {
     URL.revokeObjectURL(a.href);
   };
   return (
+    <>
+    <OpsImport store={store} data={data} />
     <section>
       <h2>データ</h2>
       <div className="panel">
         <div className="note">アプリの版：{VERSION_LABEL}</div>
         <div className="note">保存先：{backend.mode === "supabase" ? "Supabase（ログインした本人だけが読み書きできます）" : "この端末のブラウザの中（お試しモード）"}</div>
         <div className="note">クレカ明細 {data.cards.length}件・口座明細 {data.accounts.length}件・残高の記録 {data.balances.length}件・定期 {data.recurring.length}件・目標 {data.goals.length}件</div>
-        <div className="btns"><button className="btn ghost" onClick={download}>すべてのデータを書き出す（JSON）</button></div>
+        <div className="note">Claude 用の書き出し（今月の予算などのまとめ＋元のデータ）は、アプリを開くたびに保存し、GAS が1時間に1回 Google ドライブの「Gholdengo/gholdengo-snapshot.json」に置きます。</div>
+        <div className="btns"><button className="btn ghost" onClick={download}>いまの書き出しをダウンロード（JSON）</button></div>
         <Field label="移行用の JSON を取り込む" hint="移行用に作ったファイル（format: gholdengo-import-v1）。2回取り込んでも二重にはなりません">
           <input type="file" accept="application/json,.json" onChange={(e) => importFile(e.target.files?.[0])} />
         </Field>
@@ -584,5 +630,6 @@ function DataTab({ store, data }: { store: Store; data: AppData }) {
         )}
       </div>
     </section>
+    </>
   );
 }

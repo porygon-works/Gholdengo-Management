@@ -5,6 +5,7 @@ import {
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
 import { SEED_RULES } from "./seed";
+import { snapshot } from "./snapshot";
 import { convertBill, convertDebt, convertEntry, recurringFromRow } from "./v2";
 
 export interface ReviewRow { id: string; kind: string; title: string; body: string; resolved: boolean; created_at: string }
@@ -54,6 +55,23 @@ function toData(raw: Raw): AppData {
 }
 
 const CACHE = "gholdengo.cache.v3";
+
+/**
+ * Claude が読むための書き出しを Supabase に保存する（GAS が1時間に1回 Google ドライブに置く）。
+ * 前に保存したものと同じなら書かない。保存できなくても（SQL を流す前など）、アプリの動きは止めない
+ */
+let lastSnapshot = "";
+async function saveSnapshot(d: AppData, today: string) {
+  try {
+    const snap = snapshot(d, today);
+    const key = JSON.stringify({ ...snap, exportedAt: "" });
+    if (key === lastSnapshot) return;
+    await backend.upsertKeyed("snapshots", [{ data: snap }]);
+    lastSnapshot = key;
+  } catch (e) {
+    console.warn("書き出しを保存できませんでした", e);
+  }
+}
 function saveCache(raw: Raw) { try { localStorage.setItem(CACHE, JSON.stringify({ at: Date.now(), raw })); } catch { /* 容量オーバーなど */ } }
 function readCache(): Raw | null { try { return JSON.parse(localStorage.getItem(CACHE) || "null")?.raw ?? null; } catch { return null; } }
 
@@ -217,8 +235,10 @@ export function useStore() {
         raw = await backend.load();
       }
       saveCache(raw);
-      setData(toData(raw));
+      const d = toData(raw);
+      setData(d);
       setError(null);
+      await saveSnapshot(d, today);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       // 新しい表・列がまだないとき（SQL を流す前）
