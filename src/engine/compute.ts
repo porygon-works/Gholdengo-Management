@@ -389,31 +389,46 @@ export function accountFlow(d: Data, today: string, to?: string) {
 
 // ---------- 来月の支払い予定（§5.6） ----------
 
-export interface NextPayments {
-  ym: string;
-  other: number; // そのほか（分割（返済）と立替）
-  accountOut: number; // 口座からの出金予定（クレカ支払い以外）
-  cardVar: number; // クレカの変動費
-  cardFixed: number; // クレカの固定費
-  total: number;
+export interface PaymentPart { label: string; amount: number }
+export interface Payment {
+  date: string;
+  name: string;
+  amount: number;
+  state: "予定" | "見込み" | "確定";
+  entry: AccountEntry; // 口座明細の行（クレカ支払いは、まだ保存していない行のこともある）
+  parts: PaymentPart[]; // クレカ支払いの中身（大費目ごと）
 }
 
-/** 来月 ym に口座から出るお金 */
-export function nextPayments(d: Data, ym: string): NextPayments {
-  const r: NextPayments = { ym, other: 0, accountOut: 0, cardVar: 0, cardFixed: 0, total: 0 };
-  for (const b of billsFor(d, ym)) {
-    for (const e of b.items) {
-      const own = ownCost(e), part = e.amount - own;
-      if (e.group === "variable") { r.cardVar += own; r.other += part; }
-      else if (e.group === "fixed") { r.cardFixed += own; r.other += part; }
-      else r.other += e.amount;
+/**
+ * 来月の支払い予定（§5.6）：来月 ym に口座から出るお金を、引落日の順に1件ずつ。
+ * クレカ支払いは、中身を「固定費（費目ごと）・分割の返済（1件ずつ）・変動費（合計）・立替（合計）」に分ける
+ */
+export function nextPayments(d: Data, ym: string, today: string): { ym: string; rows: Payment[]; total: number } {
+  const bills = billsFor(d, ym);
+  const all = accountsWithBills(d, today, [ym]).filter((e) => e.account === "bank" && e.direction === "out" && ymOf(e.date) === ym);
+  const rows: Payment[] = all.map((e) => {
+    const b = e.group === "card" ? bills.find((x) => x.card.id === e.card && x.date === e.date) : undefined;
+    const parts: PaymentPart[] = [];
+    if (b) {
+      const title = (x: CardEntry) => x.name || x.category || x.shop || "クレカ";
+      let variable = 0, tatekae = 0;
+      const fixed = new Map<string, number>();
+      for (const x of b.items) {
+        if (x.group === "fixed") { const k = x.category || title(x); fixed.set(k, (fixed.get(k) || 0) + ownCost(x)); tatekae += x.amount - ownCost(x); }
+        else if (x.group === "variable") { variable += ownCost(x); tatekae += x.amount - ownCost(x); }
+        else if (x.group === "installment") parts.push({ label: `分割の返済：${title(x)}`, amount: x.amount });
+        else tatekae += x.amount;
+      }
+      parts.unshift(...[...fixed].map(([k, v]) => ({ label: `固定費：${k}`, amount: v })));
+      if (variable) parts.push({ label: "変動費（食料品・外食など）", amount: variable });
+      if (tatekae) parts.push({ label: "立替", amount: tatekae });
+      if (b.amount !== b.estimate) parts.push({ label: "確定の額との差", amount: b.amount - b.estimate });
     }
-    // 請求額が確定していれば、その差は変動費で調整する
-    if (b.amount !== b.estimate) r.cardVar += b.amount - b.estimate;
-  }
-  r.accountOut = d.accounts.filter((e) => e.account === "bank" && e.direction === "out" && e.group !== "card" && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0);
-  r.total = r.other + r.accountOut + r.cardVar + r.cardFixed;
-  return r;
+    const amount = b ? b.amount : e.amount;
+    const state: Payment["state"] = e.group === "card" ? (e.locked ? "確定" : "見込み") : e.status === "plan" ? "予定" : "確定";
+    return { date: e.date, name: e.name || e.category || "出金", amount, state, entry: e, parts };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  return { ym, rows, total: rows.reduce((a, r) => a + r.amount, 0) };
 }
 
 // ---------- 計画をつくる（§5.7） ----------
