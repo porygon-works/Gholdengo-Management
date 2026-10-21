@@ -17,8 +17,8 @@ export function GoalsView({ data, today }: { data: AppData; today: string }) {
             <div className="legend" style={{ justifyContent: "space-between" }}><span>{o.goal.kind === "repay" ? "0 になる月" : "目標額に届く月"}</span><b>{o.doneYm ? ymLabel(o.doneYm) : "36か月では届かない"}</b></div>
             <table className="tbl">
               <thead><tr><th>月</th><th>毎月</th><th>臨時</th><th>{o.goal.kind === "repay" ? "残り" : "たまった額"}</th></tr></thead>
-              <tbody>{o.months.filter((m, i) => i < 13 || m.pay || m.lump || m.carry).slice(0, 18).map((m) => (
-                <tr key={m.ym}><td>{m.ym.slice(2, 4)}/{+m.ym.slice(5)}</td><td className="num">{m.pay ? yen(m.pay) : "―"}</td><td className="num">{m.lump + m.carry ? yen(m.lump + m.carry) : "―"}</td><td className="num">{yen(m.left)}</td></tr>
+              <tbody>{o.months.filter((m, i) => i < 13 || m.pay || m.lump).slice(0, 18).map((m) => (
+                <tr key={m.ym}><td>{m.ym.slice(2, 4)}/{+m.ym.slice(5)}</td><td className="num">{m.pay ? yen(m.pay) : "―"}</td><td className="num">{m.lump ? yen(m.lump) : "―"}</td><td className="num">{yen(m.left)}</td></tr>
               ))}</tbody>
             </table>
             <div className="note">利息・手数料は入れていません。</div>

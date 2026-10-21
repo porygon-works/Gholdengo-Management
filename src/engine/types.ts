@@ -93,8 +93,7 @@ export interface Recurring {
   active: boolean;
 }
 
-/** 臨時の返済・積立。carry は、前月からの繰越が上限をこえた分を積立に回したもの（§5.8。目標用マイナスに入れない） */
-export interface Lump { date: string; amount: number; memo: string; carry?: boolean }
+export interface Lump { date: string; amount: number; memo: string }
 
 /** 目標マスタ（§3.4） */
 export interface Goal {
@@ -146,16 +145,15 @@ export interface Settings {
   version: number; // データの形の版（src/data/store.ts で古い版を直す）
   v2CopiedAt?: string; // 前の版の表（entries・card_bills）から、この時刻までに入った行を写した
   labels?: Record<string, string>; // 大費目の名前を変えたもの（キーは大費目の id）
-  carryFrom: string | null; // 前月からの繰越を予算に入れはじめる月（YYYY-MM）。null なら入れない（§5.8）
-  carryCap: number; // 繰越を予算に入れる上限。こえた分は carryGoal の積立に回す
-  carryGoal: string | null; // 上限をこえた繰越を回す積立の目標の id。null なら上限なしで全部予算に入れる
+  carryFrom: string | null; // 前月からの繰越を入れ、予算を「使えるお金」から自分で決めはじめる月（YYYY-MM）。null ならしない（§5.1・§5.8）
+  budgetDefault: number; // その月の予算を決めていないときの予算
 }
 
 export const RESERVE = "予備";
 /** 予算マスタで、その月の目標用マイナスを手で直した値を入れる費目 */
 export const GOAL_KEY = "#目標用マイナス";
-/** 予算マスタで、その月の前月からの繰越を手で直した値を入れる費目 */
-export const CARRY_KEY = "#繰越";
+/** 予算マスタで、その月の予算（使えるお金のうち予算にする額）を入れる費目 */
+export const BUDGET_KEY = "#予算";
 
 export const DEFAULT_SETTINGS: Settings = {
   safety: 0,
@@ -170,8 +168,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dailyCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽"],
   version: 7,
   carryFrom: null,
-  carryCap: 20000,
-  carryGoal: null,
+  budgetDefault: 90000,
 };
 
 /** 予算を持つ費目。変動費（予備を含む）と固定費 */

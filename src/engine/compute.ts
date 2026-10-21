@@ -2,7 +2,7 @@ import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
 import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost, recurringDue } from "./schedule";
 import {
-  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, CARRY_KEY, GOAL_KEY, isFixedCat, RESERVE,
+  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, BUDGET_KEY, GOAL_KEY, isFixedCat, RESERVE,
   type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
 } from "./types";
 
@@ -109,7 +109,7 @@ export function accountsWithBills(d: Data, today: string, payMonths: string[]): 
 
 // ---------- 目標（§3.4） ----------
 
-export interface GoalMonth { ym: string; pay: number; lump: number; carry: number; left: number } // carry：積立に回した繰越（§5.8）
+export interface GoalMonth { ym: string; pay: number; lump: number; left: number }
 
 /** 返済の目標の、その月の支払い日（カードなら引落日、口座なら goal.day） */
 export function goalPayDate(g: Goal, ym: string, s: Settings): string {
@@ -137,7 +137,7 @@ export function goalSchedule(g: Goal, s: Settings, fromYm: string, n: number): G
       const pay = left > 0 && !stop ? Math.min(g.monthly, left) : 0;
       const l2 = Math.min(lump, Math.max(0, left - pay));
       left -= pay + l2;
-      if (ym >= fromYm) out.push({ ym, pay, lump: l2, carry: 0, left });
+      if (ym >= fromYm) out.push({ ym, pay, lump: l2, left });
       if (out.length >= n) break;
     }
     return out;
@@ -146,12 +146,9 @@ export function goalSchedule(g: Goal, s: Settings, fromYm: string, n: number): G
   for (let k = 0, ym = start < fromYm ? start : fromYm; out.length < n && k < 240; k++, ym = addMonths(ym, 1)) {
     const active = ym >= start && (!g.end_month || ym <= g.end_month) && (!g.target || saved < g.target);
     const pay = active ? (g.target ? Math.min(g.monthly, g.target - saved) : g.monthly) : 0;
-    const ls = g.lumps.filter((l) => ymOf(l.date) === ym);
-    const lump = active ? ls.filter((l) => !l.carry).reduce((a, l) => a + l.amount, 0) : 0;
-    // 回した繰越は口座に残っているお金なので、目標額に届いたあとも数える（数えないと、次の月にまた繰り越してしまう）
-    const carry = ls.filter((l) => l.carry).reduce((a, l) => a + l.amount, 0);
-    saved += pay + lump + carry;
-    if (ym >= fromYm) out.push({ ym, pay, lump, carry, left: saved });
+    const lump = active ? g.lumps.filter((l) => ymOf(l.date) === ym).reduce((a, l) => a + l.amount, 0) : 0;
+    saved += pay + lump;
+    if (ym >= fromYm) out.push({ ym, pay, lump, left: saved });
   }
   return out;
 }
@@ -291,7 +288,10 @@ export interface MonthBase {
   goal: number; // 目標用マイナス
   goalAuto: number; // 目標マスタから出した目標用マイナス
   goalManual: boolean; // 予算マスタで手で直したか
-  T: number; // 今月の予算 ＝ 給与 ＋ 追加予算 ＋ 前月からの繰越 − 固定費 − 目標用マイナス
+  available: number; // 使えるお金 ＝ 給与 ＋ 追加予算 ＋ 前月からの繰越 − 固定費 − 目標用マイナス
+  input: boolean; // 予算を使えるお金から自分で決める月か（carryFrom の月から）
+  budgetManual: boolean; // その月の予算を予算マスタ（#予算）で決めたか
+  T: number; // 今月の予算。自分で決める月は決めた額（なければ設定の budgetDefault）、それより前の月は使えるお金
 }
 
 /** その月の「予算の元」（§5.1） */
@@ -308,8 +308,12 @@ export function monthBase(d: Data, ym: string): MonthBase {
   const hit = d.budgets.find((b) => b.month === ym && b.category === GOAL_KEY);
   const goal = hit ? hit.amount : goalAuto;
   const carryInfo = carryFor(d, ym);
-  const carry = carryInfo?.budget ?? 0;
-  return { salary, extra, carry, carryInfo, fixed, goal, goalAuto, goalManual: !!hit, T: salary + extra + carry - fixed - goal };
+  const carry = carryInfo?.raw ?? 0;
+  const available = salary + extra + carry - fixed - goal;
+  const input = !!d.settings.carryFrom && ym >= d.settings.carryFrom;
+  const set = d.budgets.find((b) => b.month === ym && b.category === BUDGET_KEY);
+  const T = input ? (set ? set.amount : d.settings.budgetDefault) : available;
+  return { salary, extra, carry, carryInfo, fixed, goal, goalAuto, goalManual: !!hit, available, input, budgetManual: !!set, T };
 }
 
 // ---------- 前月からの繰越（§5.8） ----------
@@ -370,22 +374,11 @@ export interface Carry {
   saved: number; // 積立にたまった額
   safety: number; // 安全残高
   raw: number; // 繰越 ＝ 口座 ＋ 財布 − クレカ − 積立 − 安全残高
-  toGoal: number; // 上限をこえて積立に回す額
-  toGoalAuto: number; // 予算に入れる額から出した、積立に回す額（その月の間、臨時の積立をこれに合わせる）
-  goal: Goal | null; // 回す先の積立
-  budget: number; // 予算に入れる額
-  auto: number; // いつもの分け方で予算に入れる額（上限まで。回す積立がなければ全部）
-  manual: boolean; // この月の分け方を決めたか（予算マスタの #繰越）
 }
-
-/** 上限をこえた繰越を回す積立の目標 */
-export const carryGoalOf = (d: Data): Goal | null => d.goals.find((g) => g.id === d.settings.carryGoal && g.kind === "save" && g.active) ?? null;
 
 /**
  * ym の月の、前月からの繰越（§5.8）。前の月の終わりに口座と財布に残るお金から、もう使い道が決まっているお金を引いた残り。
- * プラスなら上限（carryCap）まで予算に入れ、こえた分は積立に回す。マイナスなら全部予算から引く。
- * 月ごとに、予算に入れる額を決められる（予算マスタの #繰越）。そのときは、残りを積立に回す。
- * 積立に回す額は、その月になったら目標マスタの臨時の積立（carry）に入れる（過ぎた月の額が、あとで変わらないように）
+ * 全部「使えるお金」に入れる（マイナスなら引く）。予算にしなかった分は口座に残り、次の月の繰越に入る
  */
 export function carryFor(d: Data, ym: string): Carry | null {
   const s = d.settings;
@@ -395,37 +388,7 @@ export function carryFor(d: Data, ym: string): Carry | null {
   const at = balanceAt(d, end);
   if (!at) return null;
   const owed = cardOwedFrom(d, ym), saved = savedBy(d, prev);
-  const raw = at.bank + at.wallet - owed - saved - s.safety;
-  const goal = carryGoalOf(d);
-  const hit = d.budgets.find((b) => b.month === ym && b.category === CARRY_KEY);
-  // いつもの分け方：上限まで予算に入れる（回す積立がなければ全部）
-  const auto = goal && raw > s.carryCap ? Math.max(0, s.carryCap) : raw;
-  // 予算に入れなかったプラスの分を積立に回す（回す積立がなければ、口座に残って次の月にまた繰り越す）
-  const toGoalAuto = goal && raw > 0 ? Math.max(0, raw - (hit ? hit.amount : auto)) : 0;
-  const stored = d.goals.flatMap((g) => g.lumps).filter((l) => l.carry && ymOf(l.date) === ym);
-  const toGoal = stored.length ? stored.reduce((a, l) => a + l.amount, 0) : toGoalAuto;
-  return { end, bank: at.bank, wallet: at.wallet, owed, saved, safety: s.safety, raw, toGoal, toGoalAuto, goal, budget: hit ? hit.amount : raw - toGoal, auto, manual: !!hit };
-}
-
-export const carryLumpDate = (ym: string) => `${ym}-01`;
-
-/**
- * ym の月に積立に回す繰越を、目標マスタの臨時の積立（carry）に合わせる。直す目標と、新しい lumps を返す。
- * 回す先でない目標に入っているその月の分は消す
- */
-export function syncCarryLumps(d: Data, ym: string): { id: string; lumps: Goal["lumps"] }[] {
-  const c = carryFor(d, ym);
-  const want = c?.goal && c.toGoalAuto > 0 ? { id: c.goal.id, amount: c.toGoalAuto } : null;
-  const out: { id: string; lumps: Goal["lumps"] }[] = [];
-  for (const g of d.goals) {
-    const mine = g.lumps.filter((l) => l.carry && ymOf(l.date) === ym);
-    const rest = g.lumps.filter((l) => !(l.carry && ymOf(l.date) === ym));
-    if (want?.id === g.id) {
-      if (mine.length === 1 && mine[0].amount === want.amount) continue;
-      out.push({ id: g.id, lumps: [...rest, { date: carryLumpDate(ym), amount: want.amount, memo: "前月からの繰越（上限をこえた分）", carry: true }] });
-    } else if (mine.length) out.push({ id: g.id, lumps: rest });
-  }
-  return out;
+  return { end, bank: at.bank, wallet: at.wallet, owed, saved, safety: s.safety, raw: at.bank + at.wallet - owed - saved - s.safety };
 }
 
 /** 予算に数える出費の1件（クレカ明細か口座明細） */
