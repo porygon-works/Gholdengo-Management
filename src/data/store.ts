@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, computeMonth, DEFAULT_SETTINGS, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf,
+  addMonths, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf,
   type Balance, type Budget, type CardBill, type Data, type Debt, type Entry, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, type Raw, type Row } from "./backend";
@@ -25,7 +25,7 @@ function toData(raw: Raw): AppData {
   const cardBills: CardBill[] = raw.card_bills.map((r) => ({ id: str(r.id), pay_date: day(r.pay_date), amount: num(r.amount) }));
   const recurring: Recurring[] = raw.recurring.map((r) => ({
     id: str(r.id), name: str(r.name), kind: r.kind as Recurring["kind"], category: (r.category as string) || null, amount: num(r.amount),
-    day: num(r.day) || 1, shift: (r.shift as Recurring["shift"]) || "next", method: (r.method as Recurring["method"]) || "bank",
+    day: num(r.day) || 1, shift: (r.shift as Recurring["shift"]) || "next", method: (r.method as Recurring["method"]) || "bank", shop: str(r.shop),
     start_month: (r.start_month as string) || null, end_month: (r.end_month as string) || null, active: r.active !== false,
   }));
   const budgets: Budget[] = raw.budgets.map((r) => ({ month: str(r.month), category: str(r.category), amount: num(r.amount) }));
@@ -48,7 +48,7 @@ function readCache(): Raw | null { try { return JSON.parse(localStorage.getItem(
  * 読み込んだあとの自動処理。何か書いたら true を返す（読み直す）
  * 1. 初めての起動なら設定とルールの初めの値を入れる
  * 2. 定期のお金から、今月〜5か月先の予定を作る（3か月先の月の判定に、その先の給与まで要るため）
- * 3. 重複を自動でまとめる
+ * 3. 未分類の明細に、あとから覚えたルールを当てる。そのあと重複を自動でまとめる
  * 4. 今月の予備の予算を保存する（月が終わったあとに予算と実績を比べるため）
  */
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
@@ -60,6 +60,13 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   const months = [0, 1, 2, 3, 4, 5].map((k) => addMonths(cur, k));
   const missing = missingRecurring(d.recurring, d.entries, months);
   if (missing.length) { await backend.insert("entries", missing as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
+
+  for (const e of d.entries) {
+    if (e.category || e.locked || e.kind !== "expense" || e.merged_into || (e.source !== "card_flash" && e.source !== "card_statement")) continue;
+    const c = categorize(e.shop, d.rules);
+    if (c) { await backend.update("entries", e.id, { category: c }); wrote = true; }
+  }
+  if (wrote) return true;
 
   const { merges } = findMerges(d.entries);
   for (const m of merges) {

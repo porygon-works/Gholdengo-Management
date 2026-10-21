@@ -83,15 +83,15 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
             <div className="v num">{v.T == null ? "―" : signed(v.T)}<small>円</small></div>
             <div className="note">使った {yen(v.U)}・予定 {yen(v.P)}</div>
           </div>
-          <div className={`kpi ${v.R != null && v.R < 0 ? "bad" : "main"}`}>
+          <div className={`kpi ${(v.R != null && v.R < 0) || dip ? "bad" : "main"}`}>
             <div className="lb">残り予算<span>{v.when === "past" ? "" : `残り${v.daysLeft}日`}</span></div>
             <div className="v num">{v.when === "past" ? signed((v.T ?? 0) - usedPlanned) : v.R == null ? "―" : signed(v.R)}<small>円</small></div>
-            <div className="note" style={{ color: "inherit", opacity: .85 }}>{v.R != null && v.R < 0 ? "このままだと引落日に口座が足りません" : v.R != null && v.daysLeft ? `1日あたり ${yen(Math.max(0, Math.floor(v.R / v.daysLeft)))}円` : ""}</div>
+            <div className="note" style={{ color: "inherit", opacity: .85 }}>{dip ? `${md(dip.date)}に口座が足りません。先に入金が必要です` : v.R != null && v.R < 0 ? "このままだと引落日に口座が足りません" : v.R != null && v.daysLeft ? `1日あたり ${yen(Math.max(0, Math.floor(v.R / v.daysLeft)))}円` : ""}</div>
           </div>
         </div>
         {v.T != null && v.T > 0 && <Bar budget={v.T} used={v.U} planned={v.P} />}
-        {dip && <div className="alert bad">{md(dip.date)}に口座が {signed(dip.value)}円 になる見込みです（カードの引落日より前。これから使う額に関係なく足りません）。入金の予定や引落を確かめてください。</div>}
-        {cash && v.R != null && cash.value < v.R && <div className="alert">現金・PayPay で使うなら {signed(Math.max(0, cash.value))}円 までです（すぐ口座から出るため。{md(cash.date)}がいちばん少ない日）。</div>}
+        {dip && <div className="alert bad">{md(dip.date)}に口座が {signed(dip.value)}円 になる見込みです。出金の予定に対して {yen(data.settings.safety - dip.value)}円 足りません（これから使う額に関係なく足りません）。それまでに入金するか、引落の予定を確かめてください。</div>}
+        {cash && v.R != null && cash.value < v.R && <div className="alert">現金・チャージで使うなら {signed(Math.max(0, cash.value))}円 までです（すぐ口座から出るため。{md(cash.date)}がいちばん少ない日）。</div>}
         {v.overAllocated && <div className="alert">費目の予算の合計が、使える予算を {yen(-v.reserveBudget)}円 こえています。「設定」の予算を見直してください。</div>}
       </section>
 

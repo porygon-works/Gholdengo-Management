@@ -74,7 +74,7 @@ export function Passbook({ data, today }: { data: AppData; today: string }) {
             {pb.rows.map((r, i) => (
               <tr key={i}>
                 <td className="num">{md(r.date)}</td>
-                <td className="memo">{r.label}{r.count > 1 && <span className="note">（明細 {r.count}件）</span>}{r.entry?.status === "plan" && <> <Chip kind="warn">予定</Chip></>}{r.bill && <> <Chip kind="ok">請求額</Chip></>}</td>
+                <td className="memo">{r.label}{r.count > 1 && <span className="note">（明細 {r.count}件）</span>}{r.entry?.status === "plan" && <> <Chip kind="warn">予定</Chip></>}{r.bill && <> <Chip kind="ok">請求額</Chip>{r.cardSum != null && r.cardSum !== -r.delta && <div className="note">明細の合計 {yen(r.cardSum)}円（差 {signed(-r.delta - r.cardSum)}円。入っていない明細があるかもしれません）</div>}</>}</td>
                 <td className="num">{r.delta < 0 ? yen(-r.delta) : ""}</td>
                 <td className="num pos">{r.delta > 0 ? yen(r.delta) : ""}</td>
                 <td className={`num ${r.balance < 0 ? "neg" : ""}`}>{signed(r.balance)}</td>
@@ -93,20 +93,17 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
   const [date, setDate] = useState(today);
   const [bank, setBank] = useState<number | "">("");
   const [cash, setCash] = useState<number | "">(last?.cash ?? "");
-  const [paypay, setPaypay] = useState<number | "">(last?.paypay ?? "");
   const save = async () => {
     if (bank === "") { toast("口座の残高を入れてください"); return; }
-    if (await store.run(() => actions.addBalance({ date, bank, cash: cash || 0, paypay: paypay || 0, memo: "" }))) { toast("残高を更新しました"); onClose(); }
+    if (await store.run(() => actions.addBalance({ date, bank, cash: cash || 0, paypay: 0, memo: "" }))) { toast("残高を更新しました"); onClose(); }
   };
   const hist = [...data.balances].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
   return (
     <Sheet title="今の残高を入れる" onClose={onClose}>
       <Field label="日付" hint="この日の終わりの残高として扱います"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
       <Field label="口座"><NumInput value={bank} onChange={setBank} autoFocus /></Field>
-      <div className="grid2">
-        <Field label="現金（財布）"><NumInput value={cash} onChange={setCash} /></Field>
-        <Field label="PayPay残高"><NumInput value={paypay} onChange={setPaypay} /></Field>
-      </div>
+      <Field label="現金（財布）"><NumInput value={cash} onChange={setCash} /></Field>
+      <div className="note">PayPay と交通系は、チャージしたときに使ったものとして数えるので、残高は入れません。</div>
       <div className="btns"><button className="btn" onClick={save}>保存</button><button className="btn ghost" onClick={onClose}>やめる</button></div>
       {hist.length > 0 && (
         <table className="tbl"><tbody>{hist.map((b) => (

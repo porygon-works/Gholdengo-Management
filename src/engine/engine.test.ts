@@ -46,7 +46,7 @@ describe("資産から減る日", () => {
 });
 
 describe("定期のお金", () => {
-  const salary: Recurring = { id: "r1", name: "給与", kind: "income", category: null, amount: 250000, day: 15, shift: "next", method: "bank", start_month: null, end_month: null, active: true };
+  const salary: Recurring = { id: "r1", name: "給与", kind: "income", category: null, amount: 250000, day: 15, shift: "next", method: "bank", shop: "", start_month: null, end_month: null, active: true };
   it("土日祝をずらして予定を作る", () => {
     expect(recurringDate(salary, "2026-11")).toBe("2026-11-16");
     const out = missingRecurring([salary], [], ["2026-11", "2026-12"]);
@@ -88,12 +88,17 @@ describe("重複の処理", () => {
     const prime = E({ id: "r", source: "card_statement", amount: 600, date: "2026-10-04", category: "サブスク" });
     expect(findMerges([plan, prime]).merges).toHaveLength(0);
   });
-  it("金額がぴったり同じ予定は費目が違ってもまとめ、費目は予定に合わせる", () => {
-    const plan = E({ id: "p", status: "plan", source: "recurring", amount: 6660, date: "2026-11-10", category: "定期代" });
-    const flash = E({ id: "f", source: "card_flash", status: "flash", amount: 6660, date: "2026-11-09", category: "交通", shop: "モバイルSuica" });
+  it("予定にお店の名前のヒントがあれば、費目が違ってもまとめ、費目は予定に合わせる", () => {
+    const plan = E({ id: "p", status: "plan", source: "recurring", amount: 6660, date: "2026-11-10", category: "定期代", shop: "モバイルSuica" });
+    const flash = E({ id: "f", source: "card_flash", status: "flash", amount: 6660, date: "2026-11-09", category: "交通", shop: "モバイルＳｕｉｃａ（Ａｐｐｌｅ）" });
     const { merges } = findMerges([plan, flash]);
     expect(merges[0].absorb.id).toBe("p");
     expect(merges[0].patch.category).toBe("定期代");
+  });
+  it("費目が違う予定とは、金額がぴったりでもまとめない（外食 5,000円 と 通信 5,000円の予定）", () => {
+    const plan = E({ id: "p", status: "plan", source: "recurring", amount: 5000, date: "2026-10-28", category: "通信" });
+    const manual = E({ id: "m", source: "manual", amount: 5000, date: "2026-10-21", category: "外食", locked: true });
+    expect(findMerges([plan, manual]).merges).toHaveLength(0);
   });
   it("候補が2件なら要確認", () => {
     const a = E({ id: "a", amount: 500, date: "2026-10-10" });
@@ -165,6 +170,18 @@ describe("使える額の計算", () => {
     // 現金は今日出ていくので、10/27 の 75000 で決まる
     expect(cashLimit(d, today)).toEqual({ value: 65000, date: "2026-10-27" });
     expect(dipBefore(d, today)).toBeNull();
+  });
+  it("残高の報告日より前の日付の予定は、残高に入っているものとして数えない（月の途中で作った給与の予定など）", () => {
+    const d = D({
+      balances: [base],
+      entries: [
+        E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-10-15", category: null }),
+        E({ kind: "expense", status: "plan", method: "cash", amount: 1000, date: "2026-10-19", category: "食料品" }), // 報告日と同じ日 → 残高に入っている
+        E({ kind: "expense", status: "plan", method: "card", amount: 2000, date: "2026-10-18", category: "食料品" }), // カードは 11/26 に引落なので数える
+      ],
+    });
+    const p = projection(d, today)!;
+    expect(p.events.map((e) => [e.date, e.delta])).toEqual([["2026-11-26", -2000]]);
   });
   it("引落日より前に安全残高を下回る日があれば知らせる", () => {
     const d = D({ balances: [base], entries: [E({ kind: "expense", method: "bank", category: "固定引落", amount: 400000, date: "2026-11-04" })] });
