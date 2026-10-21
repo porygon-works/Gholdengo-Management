@@ -78,13 +78,21 @@ describe("重複の処理", () => {
     expect(merges[1].patch.category).toBe("外食");
     expect(merges[1].patch.item).toBe("飲み会");
   });
-  it("予定は金額±20%・7日以内なら吸収する", () => {
-    const plan = E({ id: "p", status: "plan", amount: 5000, date: "2026-10-24", category: "外食" });
-    const real = E({ id: "r", source: "card_flash", status: "flash", amount: 5800, date: "2026-10-25", category: "外食" });
+  it("定期のお金の予定は、金額±20%・7日以内なら自動で吸収する", () => {
+    const plan = E({ id: "p", status: "plan", source: "recurring", amount: 5000, date: "2026-10-24", category: "通信" });
+    const real = E({ id: "r", source: "card_statement", amount: 5800, date: "2026-10-25", category: "通信" });
     expect(findMerges([plan, real]).merges[0]?.absorb.id).toBe("p");
   });
+  it("一回きりの予定は自動でまとめず、要確認で聞く（Amazonの買い物がスマホケースの予定と取り違えられないように）", () => {
+    const plan = E({ id: "p", status: "plan", source: "migration", amount: 3000, date: "2026-10-17", category: "日用品・通販", item: "スマホケース" });
+    const amazon = E({ id: "a", source: "card_statement", amount: 3200, date: "2026-10-21", category: "日用品・通販", shop: "AMAZON.CO.JP" });
+    const { merges, review } = findMerges([plan, amazon]);
+    expect(merges).toHaveLength(0);
+    expect(review[0].candidates.map((c) => c.id)).toEqual(["p"]);
+    expect(review[0].reason).toContain("スマホケース");
+  });
   it("3,000円未満の予定は金額がぴったりのときだけまとめる", () => {
-    const plan = E({ id: "p", status: "plan", amount: 550, date: "2026-10-06", category: "サブスク" });
+    const plan = E({ id: "p", status: "plan", source: "recurring", amount: 550, date: "2026-10-06", category: "サブスク" });
     const prime = E({ id: "r", source: "card_statement", amount: 600, date: "2026-10-04", category: "サブスク" });
     expect(findMerges([plan, prime]).merges).toHaveLength(0);
   });

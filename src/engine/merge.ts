@@ -44,7 +44,9 @@ function match(hi: Entry, lo: Entry): Match {
     if (hint && normalizeShop(hi.shop).includes(hint)) return "auto";
     // それ以外は、費目が同じか、どちらかが未分類のときだけ
     if (hi.category && lo.category && hi.category !== lo.category) return null;
-    return "auto";
+    // 定期のお金（サブスク・通信など）の予定は自動でまとめる。
+    // 一回きりの予定（飲み会・買い物など）は、同じ費目で似た金額の別の買い物と取り違えやすいので、要確認で聞く
+    return lo.source === "recurring" ? "auto" : "near";
   }
   if (hi.method !== lo.method) return null;
   if (hi.amount === lo.amount) {
@@ -107,7 +109,11 @@ export function findMerges(entries: Entry[]): { merges: Merge[]; review: ReviewI
     } else if (pick.length > 1) {
       review.push({ entry: hi, candidates: pick, reason: "同じものの候補が2件以上あります" });
     } else if (nears.length) {
-      review.push({ entry: hi, candidates: nears, reason: "日付か金額が少し違う、同じかもしれない明細があります" });
+      const plans = nears.filter((e) => e.status === "plan");
+      const reason = plans.length === nears.length
+        ? `予定「${plans.map((p) => p.item || p.shop || p.category || "予定").join("」「")}」の支払いかもしれません`
+        : "日付か金額が少し違う、同じかもしれない明細があります";
+      review.push({ entry: hi, candidates: nears, reason });
     }
   }
   return { merges, review };
