@@ -1,79 +1,51 @@
 import { useState } from "react";
-import { accountNow, addMonths, balanceTotal, cardPayDate, forecast, monthBase, passbook, paydayChecks, ymOf } from "../engine";
+import { accountFlow, accountNow, addMonths, cardPayDate, goalOutlook, ymOf } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
-import { Chip, Empty, Field, md, NumInput, Sheet, signed, toast, yen } from "./common";
+import { accountTitle, Chip, Empty, Field, md, NumInput, Sheet, signed, toast, yen, ymLabel } from "./common";
+import type { Open } from "./Sheets";
 
-export function Goals({ data, today }: { data: AppData; today: string }) {
-  const s = data.settings;
-  const debts = data.debts;
-  const known = debts.filter((d) => !d.planned).reduce((a, d) => a + d.balance, 0);
-  const fc = forecast(data, today, 3);
-  const checks = paydayChecks(data, today, 3);
-  const goal = monthBase(data, ymOf(today)).goal;
-  const minPay = debts.filter((d) => !d.planned).reduce((a, d) => a + d.min_payment, 0);
-
+/** 目標の見通し（§5.7）。目標マスタは設定で直す */
+export function GoalsView({ data, today }: { data: AppData; today: string }) {
+  const out = goalOutlook(data, ymOf(today), 36);
+  if (!out.length) return <Empty>目標がありません。設定→目標で入れてください</Empty>;
   return (
     <>
-      <section>
-        <h2>① リボ・分割の残高を0にする <small>いま {yen(known)}円</small></h2>
-        <div className="panel">
-          {debts.length ? <div className="list">{debts.map((d) => (
-            <div className="row" key={d.id} style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <span className="t"><div>{d.name} {d.planned && <Chip kind="warn">予定</Chip>}</div><div>{d.note}</div></span>
-              <span className="a num">{yen(d.balance)}</span>
-            </div>))}</div> : <div className="note">借金は入っていません（設定→借金）</div>}
-          {minPay > goal && <div className="alert">今月の目標用マイナス（{yen(goal)}円）が、最低返済額の合計（{yen(minPay)}円）より少ないです。</div>}
-        </div>
-      </section>
-      <section>
-        <h2>② 引落日に口座が足りない月を0にする <small>その月の予算を全部使った場合</small></h2>
-        {fc ? (
+      {out.map((o) => (
+        <section key={o.goal.id}>
+          <h2>{o.goal.name} <small>{o.goal.kind === "repay" ? `残高 ${yen(o.goal.balance)}円` : `目標 ${yen(o.goal.target)}円`}・毎月 {yen(o.goal.monthly)}円</small></h2>
           <div className="panel scroll">
+            <div className="legend" style={{ justifyContent: "space-between" }}><span>{o.goal.kind === "repay" ? "0 になる月" : "目標額に届く月"}</span><b>{o.doneYm ? ymLabel(o.doneYm) : "36か月では届かない"}</b></div>
             <table className="tbl">
-              <thead><tr><th>予算の月</th><th>使える額</th><th>少ない日</th><th>判定</th></tr></thead>
-              <tbody>{fc.map((f) => {
-                const st = f.R < 0 ? (["bad", "足りない"] as const) : f.R < 10000 ? (["warn", "うすい"] as const) : (["ok", "OK"] as const);
-                return <tr key={f.ym}><td>{+f.ym.slice(5)}月<div className="note">{md(f.from)}〜{md(f.to)}</div></td><td className={`num ${f.R < 0 ? "neg" : ""}`}>{signed(f.R)}</td><td className="num">{md(f.min.date)}</td><td><Chip kind={st[0]}>{st[1]}</Chip></td></tr>;
-              })}</tbody>
+              <thead><tr><th>月</th><th>毎月</th><th>臨時</th><th>{o.goal.kind === "repay" ? "残り" : "たまった額"}</th></tr></thead>
+              <tbody>{o.months.filter((m, i) => i < 13 || m.pay || m.lump).slice(0, 18).map((m) => (
+                <tr key={m.ym}><td>{m.ym.slice(2, 4)}/{+m.ym.slice(5)}</td><td className="num">{m.pay ? yen(m.pay) : "―"}</td><td className="num">{m.lump ? yen(m.lump) : "―"}</td><td className="num">{yen(m.left)}</td></tr>
+              ))}</tbody>
             </table>
-            <div className="note">それぞれの月の予算をカードで全部使い、その引落日から次の引落日まで口座が足りるかを見ています。前の月の分は引いてあります。まだ分からない現金の出費は入っていません。</div>
+            <div className="note">利息・手数料は入れていません。</div>
           </div>
-        ) : <Empty>残高を入れると出ます</Empty>}
-      </section>
-      <section>
-        <h2>③ 給料日前日に目標の残高を残す <small>目標 {yen(s.reserveGoal)}円</small></h2>
-        <div className="panel">
-          {checks.length ? checks.map((c) => {
-            const r = Math.max(0, Math.min(100, (c.value / s.reserveGoal) * 100));
-            return (
-              <div key={c.date} style={{ display: "grid", gap: 4 }}>
-                <div className="legend" style={{ justifyContent: "space-between" }}><span>{md(c.date)}</span><b className="num">{signed(c.value)}円（{Math.round(r)}%）</b></div>
-                <div className="bar"><i className="u" style={{ width: `${r}%` }} /></div>
-              </div>
-            );
-          }) : <div className="note">給与の定期のお金と残高を入れると出ます</div>}
-        </div>
-      </section>
+        </section>
+      ))}
     </>
   );
 }
 
-export function Passbook({ data, today }: { data: AppData; today: string }) {
+/** 口座の見通し（通帳の形）：いまの口座残高から、来月の引落日のあとまで */
+export function Passbook({ data, today, onOpen }: { data: AppData; today: string; onOpen: (o: Open) => void }) {
   const to = cardPayDate(addMonths(ymOf(today), 1), data.settings);
-  const pb = passbook(data, today, to);
-  if (!pb) return <Empty>残高を入れると出ます</Empty>;
+  const f = accountFlow(data, today, to);
+  if (!f) return <Empty>残高を入れると出ます</Empty>;
   return (
     <section>
-      <h2>口座の動き <small>{md(pb.base.date)}の報告〜{md(to)}・予定を含む</small></h2>
+      <h2>口座の動き <small>今日〜{md(to)}の前日・予定を含む</small></h2>
       <div className="panel scroll">
         <table className="tbl">
-          <thead><tr><th>日付</th><th>摘要</th><th>お支払</th><th>お預り</th><th>残高</th></tr></thead>
+          <thead><tr><th>日付</th><th style={{ textAlign: "left" }}>摘要</th><th>お支払</th><th>お預り</th><th>残高</th></tr></thead>
           <tbody>
-            <tr><td className="num">{md(pb.base.date)}</td><td className="memo">残高（報告）</td><td /><td /><td className="num">{yen(balanceTotal(pb.base))}</td></tr>
-            {pb.rows.map((r, i) => (
-              <tr key={i}>
+            <tr><td className="num">{md(today)}</td><td className="memo">口座残高（いま）</td><td /><td /><td className="num">{yen(f.now.bank)}</td></tr>
+            {f.rows.map((r) => (
+              <tr key={r.entry.id} className="tap" onClick={() => onOpen({ type: "account", entry: r.entry })}>
                 <td className="num">{md(r.date)}</td>
-                <td className="memo">{r.label}{r.count > 1 && <span className="note">（明細 {r.count}件）</span>}{r.entry?.status === "plan" && <> <Chip kind="warn">予定</Chip></>}{r.bill && <> <Chip kind="ok">請求額</Chip>{r.cardSum != null && r.cardSum !== -r.delta && <div className="note">明細の合計 {yen(r.cardSum)}円（差 {signed(-r.delta - r.cardSum)}円。入っていない明細があるかもしれません）</div>}</>}</td>
+                <td className="memo">{accountTitle(r.entry)}{r.entry.status === "plan" && <> <Chip kind="warn">{r.entry.group === "card" ? "見込み" : "予定"}</Chip></>}</td>
                 <td className="num">{r.delta < 0 ? yen(-r.delta) : ""}</td>
                 <td className="num pos">{r.delta > 0 ? yen(r.delta) : ""}</td>
                 <td className={`num ${r.balance < 0 ? "neg" : ""}`}>{signed(r.balance)}</td>
@@ -82,21 +54,21 @@ export function Passbook({ data, today }: { data: AppData; today: string }) {
           </tbody>
         </table>
       </div>
-      <div className="note">カードの明細は引落日にまとめて出ます。カードの請求額が届いた月は、明細の合計の代わりに請求額を使います。「残り予算」の分はここには入っていません。</div>
     </section>
   );
 }
 
+/** 口座と財布：残高を直す・ATM・履歴 */
 export function BalanceSheet({ store, data, today, onClose }: { store: Store; data: AppData; today: string; onClose: () => void }) {
   const now = accountNow(data, today);
-  const cur = { bank: now?.bank ?? 0, cash: now?.cash ?? 0 };
+  const cur = { bank: now?.bank ?? 0, wallet: now?.wallet ?? 0 };
   const [bank, setBank] = useState<number | "">("");
-  const [cash, setCash] = useState<number | "">("");
+  const [wallet, setWallet] = useState<number | "">("");
   const [atm, setAtm] = useState<number | "">("");
   const [atmDate, setAtmDate] = useState(today);
-  const fix = async (which: "bank" | "cash", v: number | "") => {
+  const fix = async (which: "bank" | "wallet", v: number | "") => {
     if (v === "") { toast("本当の残高を入れてください"); return; }
-    if (await store.run(() => actions.fixBalance(today, cur, which, v))) { toast(which === "bank" ? "口座の残高を直しました" : "財布の残高を直しました"); which === "bank" ? setBank("") : setCash(""); }
+    if (await store.run(() => actions.fixBalance(today, cur, which, v))) { toast(which === "bank" ? "口座の残高を直しました" : "財布の残高を直しました"); if (which === "bank") setBank(""); else setWallet(""); }
   };
   const addAtm = async () => {
     if (!atm) { toast("引き出した額を入れてください"); return; }
@@ -107,16 +79,16 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
     <Sheet title="口座と財布" onClose={onClose}>
       <div className="cards">
         <div className="kpi"><div className="lb">口座（いま）</div><div className="v num">{now ? yen(cur.bank) : "―"}<small>円</small></div></div>
-        <div className="kpi"><div className="lb">財布（いま）</div><div className="v num">{now ? yen(cur.cash) : "―"}<small>円</small></div></div>
+        <div className="kpi"><div className="lb">財布（いま）</div><div className="v num">{now ? yen(cur.wallet) : "―"}<small>円</small></div></div>
       </div>
-      <div className="note">{now ? `${md(now.base.date)}に入れた残高に、そのあとの入金・口座払い・引き落とし・現金で使ったものなどを足し引きした額です。クレカで使ったものは、引落日に口座から減ります。` : "まだ残高がありません。下で入れてください。"}</div>
+      <div className="note">{now ? `${md(now.base.date)}に入れた残高に、そのあとの確定した口座明細を足し引きした額です。クレカで使ったものは、引落日に「クレカ支払い」で口座から減ります。` : "まだ残高がありません。下で入れてください。"}</div>
 
       <h2>残高を直す <small>通帳やアプリを見て、本当の額を入れる</small></h2>
       <div className="grid2">
         <Field label="口座の本当の残高"><NumInput value={bank} onChange={setBank} /></Field>
         <div className="btns"><button className="btn sm" onClick={() => fix("bank", bank)}>口座を直す</button></div>
-        <Field label="財布の本当の残高"><NumInput value={cash} onChange={setCash} /></Field>
-        <div className="btns"><button className="btn sm" onClick={() => fix("cash", cash)}>財布を直す</button></div>
+        <Field label="財布の本当の残高"><NumInput value={wallet} onChange={setWallet} /></Field>
+        <div className="btns"><button className="btn sm" onClick={() => fix("wallet", wallet)}>財布を直す</button></div>
       </div>
 
       <h2>ATMで引き出した <small>口座が減り、財布が増える</small></h2>
@@ -132,7 +104,7 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
           <table className="tbl">
             <tbody>
               <tr><td className="num">{md(now.base.date)}</td><td style={{ textAlign: "left" }}>入れた残高</td><td /><td className="num">{yen(now.base.bank)}</td></tr>
-              {now.rows.map((r, i) => <tr key={i}><td className="num">{md(r.date)}</td><td style={{ textAlign: "left" }}>{r.label}</td><td className={`num ${r.delta < 0 ? "neg" : ""}`}>{r.delta > 0 ? "＋" : "−"}{yen(Math.abs(r.delta))}</td><td className="num">{signed(r.balance)}</td></tr>)}
+              {now.rows.map((r) => <tr key={r.entry.id}><td className="num">{md(r.date)}</td><td style={{ textAlign: "left" }}>{accountTitle(r.entry)}</td><td className={`num ${r.delta < 0 ? "neg" : ""}`}>{r.delta > 0 ? "＋" : "−"}{yen(Math.abs(r.delta))}</td><td className="num">{signed(r.balance)}</td></tr>)}
             </tbody>
           </table>
         </>

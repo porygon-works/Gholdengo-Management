@@ -1,26 +1,29 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { cardOf, type Entry, type Method, type Settings, type Status } from "../engine";
+import { ACCOUNT_GROUP_LABEL, CARD_GROUP_LABEL, type AccountEntry, type CardEntry, type Settings, type Status } from "../engine";
 
 export const yen = (n: number) => (Math.round(n) || 0).toLocaleString("ja-JP");
 export const signed = (n: number) => (n < 0 ? "−" + yen(-n) : yen(n));
 export const md = (s: string) => { const [, m, d] = s.split("-"); return `${+m}/${+d}`; };
 export const ymLabel = (ym: string) => `${ym.slice(0, 4)}年${+ym.slice(5)}月`;
+export const wday = (d: string) => "日月火水木金土"[new Date(d + "T00:00:00Z").getUTCDay()];
 
-// PayPay と交通系は、チャージした額をその日の支出として数える（チャージしたあと何に使ったかは管理しない）
-export const METHOD_LABEL: Record<Method, string> = { card: "クレカ", cash: "現金", paypay: "PayPayチャージ", ic: "交通系チャージ", point: "ポイント", bank: "口座", revo: "リボ" };
-export const QUICK_METHODS: Method[] = ["card", "cash", "paypay", "ic"];
+export const STATUS_LABEL: Record<Status, string> = { plan: "予定", confirmed: "確定" };
+export const CARD_SOURCE_LABEL: Record<CardEntry["source"], string> = { manual: "手入力", card_flash: "カード速報", card_statement: "カード明細", recurring: "定期", goal: "目標", migration: "移行" };
+export const ACCOUNT_SOURCE_LABEL: Record<AccountEntry["source"], string> = { manual: "手入力", recurring: "定期", card_bill: "クレカ請求", goal: "目標", migration: "移行" };
+export { ACCOUNT_GROUP_LABEL, CARD_GROUP_LABEL };
 
-/** 金種の選択肢。クレカはカードごとに分けて "card:smbc" のように書く */
-export const payKey = (s: Settings, method: Method, card: string | null) => (method === "card" ? `card:${cardOf(s, card).id}` : method);
-export const fromPayKey = (k: string): { method: Method; card: string | null } => (k.startsWith("card:") ? { method: "card", card: k.slice(5) } : { method: k as Method, card: null });
-export const payKeys = (s: Settings, ms: Method[]) => ms.flatMap((m) => (m === "card" ? s.cards.map((c) => `card:${c.id}`) : [m]));
-export const payLabels = (s: Settings): Record<string, string> => ({ ...METHOD_LABEL, ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, c.name])) });
-export const ALL_METHODS: Method[] = ["card", "cash", "paypay", "ic", "bank", "revo"];
-export const STATUS_LABEL: Record<Status, string> = { plan: "予定", flash: "速報", confirmed: "確定" };
-export const SOURCE_LABEL: Record<Entry["source"], string> = { manual: "手入力", card_flash: "カード速報", card_statement: "カード明細", recurring: "定期", migration: "移行" };
+export const cardTitle = (e: CardEntry) => e.name || e.shop || e.category || "クレカ";
+export const accountTitle = (e: AccountEntry) => e.name || e.category || ACCOUNT_GROUP_LABEL[e.group];
+export const ownCost = (e: { amount: number; tatekae?: number }) => Math.max(0, e.amount - (e.tatekae || 0));
 
-export const entryTitle = (e: Entry) => e.item || e.shop || (e.kind === "income" ? "入金" : "支出");
-export const ownCost = (e: Entry) => Math.max(0, e.amount - (e.tatekae || 0));
+/**
+ * 払い方の選択肢（使ったものを入れるとき）。
+ * クレカはカードごと（"card:smbc"）、現金は財布、PayPay は口座から（チャージした額を使ったものとして数える）、口座は口座払い
+ */
+export type Pay = string;
+export const payOptions = (s: Settings): Pay[] => [...s.cards.map((c) => `card:${c.id}`), "wallet", "paypay", "bank"];
+export const payLabels = (s: Settings): Record<Pay, string> => ({ ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, c.name])), wallet: "現金", paypay: "PayPay", bank: "口座" });
+export const cardOfPay = (p: Pay) => (p.startsWith("card:") ? p.slice(5) : null);
 
 // ---------- 通知 ----------
 
@@ -86,8 +89,8 @@ export function Chip({ kind, children }: { kind?: "ok" | "warn" | "bad"; childre
   return <span className={`chip ${kind ?? ""}`}>{children}</span>;
 }
 
-export function StatusChip({ e }: { e: Entry }) {
-  return <Chip kind={e.status === "confirmed" ? "ok" : e.status === "plan" ? "warn" : undefined}>{STATUS_LABEL[e.status]}</Chip>;
+export function StatusChip({ status, label }: { status: Status; label?: string }) {
+  return <Chip kind={status === "confirmed" ? "ok" : "warn"}>{label ?? STATUS_LABEL[status]}</Chip>;
 }
 
 export function Bar({ budget, used, planned }: { budget: number; used: number; planned: number }) {

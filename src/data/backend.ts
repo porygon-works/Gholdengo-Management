@@ -2,8 +2,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // データの置き場所。Supabase の設定があれば Supabase、なければブラウザの中（お試しモード）
 
-export type Table = "entries" | "balances" | "card_bills" | "recurring" | "budgets" | "rules" | "debts" | "settings" | "review";
-export const TABLES: Table[] = ["entries", "balances", "card_bills", "recurring", "budgets", "rules", "debts", "settings", "review"];
+// entries・card_bills・debts は前の版（v2）の表。新しい表（account_entries・card_entries・goals）へ写すために読む
+export type Table = "account_entries" | "card_entries" | "goals" | "entries" | "balances" | "card_bills" | "recurring" | "budgets" | "rules" | "debts" | "settings" | "review";
+export const TABLES: Table[] = ["account_entries", "card_entries", "goals", "entries", "balances", "card_bills", "recurring", "budgets", "rules", "debts", "settings", "review"];
 
 export type Row = Record<string, unknown>;
 export type Raw = Record<Table, Row[]>;
@@ -72,6 +73,7 @@ function supabaseBackend(sb: SupabaseClient): Backend {
 // ---------- お試しモード（localStorage） ----------
 
 const LS = "gholdengo.local.v1";
+export const newId = () => uuid();
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 
 function readLocal(): Raw {
@@ -83,7 +85,12 @@ function readLocal(): Raw {
 }
 function writeLocal(d: Raw) { try { localStorage.setItem(LS, JSON.stringify(d)); } catch { /* 保存できない環境 */ } }
 
-const ENTRY_DEFAULTS = { card: null, shop: "", item: "", memo: "", tatekae: 0, merged_into: null, recurring_id: null, not_dup: [], locked: false, source_ref: null };
+const DEFAULTS: Partial<Record<Table, Row>> = {
+  entries: { card: null, shop: "", item: "", memo: "", tatekae: 0, merged_into: null, recurring_id: null, not_dup: [], locked: false, source_ref: null },
+  account_entries: { account: "bank", category: null, name: "", memo: "", source: "manual", source_ref: null, recurring_id: null, goal_id: null, card: null, pair_id: null, locked: false },
+  card_entries: { card: "smbc", group: "variable", category: null, name: "", shop: "", memo: "", tatekae: 0, source: "manual", source_ref: null, merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: null },
+  goals: { card: null, balance: 0, as_of: null, target: 0, monthly: 0, day: 27, start_month: null, end_month: null, lumps: [], active: true, sort: 0, source_ref: null },
+};
 
 function localBackend(): Backend {
   return {
@@ -95,7 +102,7 @@ function localBackend(): Backend {
         const key = opts?.onConflict;
         const hit = key && r[key] != null ? d[t].find((x) => x[key] === r[key]) : undefined;
         if (hit) { if (opts?.merge) Object.assign(hit, r); continue; }
-        d[t].push({ ...(t === "entries" ? ENTRY_DEFAULTS : {}), id: uuid(), created_at: new Date().toISOString(), ...r });
+        d[t].push({ ...(DEFAULTS[t] ?? {}), id: uuid(), created_at: new Date().toISOString(), ...r });
       }
       writeLocal(d);
     },
@@ -108,7 +115,7 @@ function localBackend(): Backend {
     async remove(t, id) {
       const d = readLocal();
       d[t] = d[t].filter((x) => x.id !== id);
-      if (t === "entries") for (const e of d.entries) if (e.merged_into === id) e.merged_into = null;
+      if (t === "entries" || t === "card_entries") for (const e of d[t]) if (e.merged_into === id) e.merged_into = null;
       writeLocal(d);
     },
     async upsertKeyed(t, rows) {
