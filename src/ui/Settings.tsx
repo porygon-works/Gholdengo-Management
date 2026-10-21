@@ -97,19 +97,22 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
   );
 }
 
-/** 前月からの繰越（§5.8）の内訳。この月だけ手で直せる */
+/** 前月からの繰越（§5.8）の内訳と、この月の使い方（予算に入れる額。残りは積立へ） */
 function CarryLine({ store, data, month }: { store: Store; data: AppData; month: string }) {
   const c = monthBase(data, month).carryInfo!;
+  const past = month < ymOf(todayJST());
   const [edit, setEdit] = useState(false);
   const [val, setVal] = useState<number | "">("");
-  const save = async (amount: number | null) => {
-    if (await store.run(() => actions.saveCarry(month, amount))) { toast(amount == null ? "計算した額に戻しました" : "保存しました"); setEdit(false); }
+  const save = async (amount: number | null, msg: string) => {
+    if (await store.run(() => actions.saveCarry(month, amount))) { toast(msg); setEdit(false); }
   };
+  const goalName = c.goal?.name ?? "積立";
   const row = (label: string, v: number) => <tr><td>{label}</td><td className="num">{money(v)}</td></tr>;
+  const mode = !c.manual ? "いつもの分け方" : c.budget >= c.raw ? "全部予算に" : "額を決めた";
   return (
     <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
       <div className="legend" style={{ justifyContent: "space-between" }}>
-        <span><b style={{ color: "var(--ink)" }}>＋ 前月からの繰越</b> {c.manual ? <Chip kind="warn">この月だけ直した</Chip> : <Chip>口座から計算</Chip>}</span>
+        <span><b style={{ color: "var(--ink)" }}>＋ 前月からの繰越</b> {c.raw > 0 && <Chip kind={c.manual ? "warn" : undefined}>{mode}</Chip>}</span>
         <b className={`num ${c.budget < 0 ? "neg" : ""}`}>{signed(c.budget)}円</b>
       </div>
       <table className="tbl">
@@ -119,23 +122,32 @@ function CarryLine({ store, data, month }: { store: Store; data: AppData; month:
           {row("− まだ引き落とされていないクレカ（前の月までに使った分）", c.owed)}
           {c.saved !== 0 && row("− 積立にたまった額（口座に置いたまま）", c.saved)}
           {c.safety !== 0 && row("− 安全残高", c.safety)}
-          {c.toGoal > 0 && row(`− 上限をこえた分（「${c.goal?.name ?? "積立"}」へ）`, c.toGoal)}
         </tbody>
-        <tfoot><tr><td>＝ 予算に入れる繰越{c.manual ? `（計算なら ${signed(c.auto)}円）` : ""}</td><td className="num">{signed(c.auto)}</td></tr></tfoot>
+        <tfoot>
+          <tr><td>＝ 繰越</td><td className="num">{signed(c.raw)}</td></tr>
+          {c.raw > 0 && <tr><td>そのうち予算に入れる</td><td className="num">{signed(c.budget)}</td></tr>}
+          {c.toGoal > 0 && <tr><td>そのうち「{goalName}」に回す</td><td className="num">{money(c.toGoal)}</td></tr>}
+          {c.raw > 0 && c.budget + c.toGoal < c.raw && <tr><td>どちらにも入れない（口座に残り、次の月にまた繰り越す）</td><td className="num">{money(c.raw - c.budget - c.toGoal)}</td></tr>}
+        </tfoot>
       </table>
-      <div className="note">前の月の終わりに残ったお金のうち、使い道が決まっていない分です。プラスなら上限 {yen(data.settings.carryCap)}円 まで予算に足し、こえた分は積立に回します。マイナスなら予算から引きます。</div>
-      {edit ? (
+      {c.raw < 0 ? <div className="note">前の月に使いすぎた分です。この月の予算から引きます。</div>
+        : <div className="note">いつもは上限 {yen(data.settings.carryCap)}円 まで予算に入れ、残りを{c.goal ? `「${goalName}」` : "積立"}に回します{c.goal ? "" : "（回す積立がないので、いまは全部予算に入れます）"}。月ごとに変えられます。</div>}
+      {!past && c.raw > 0 && (edit ? (
         <div className="btns" style={{ alignItems: "center" }}>
           <div style={{ width: 140 }}><NumInput value={val} onChange={setVal} autoFocus /></div>
-          <button className="btn sm" onClick={() => save(val === "" ? 0 : val)}>保存</button>
+          <button className="btn sm" onClick={() => save(val === "" ? 0 : val, "予算に入れる額を決めました")}>予算に入れる</button>
           <button className="btn sm ghost" onClick={() => setEdit(false)}>やめる</button>
         </div>
       ) : (
         <div className="btns">
-          <button className="btn sm ghost" onClick={() => { setEdit(true); setVal(c.budget); }}>この月だけ直す</button>
-          {c.manual && <button className="btn sm ghost" onClick={() => save(null)}>計算した額に戻す</button>}
+          <button className="btn sm ghost" aria-pressed={c.manual && c.budget >= c.raw} onClick={() => save(c.raw, "この月は繰越を全部予算に入れます")}>全部予算に</button>
+          <button className="btn sm ghost" onClick={() => { setEdit(true); setVal(c.budget); }}>予算に入れる額を決める</button>
+          {c.manual && <button className="btn sm ghost" onClick={() => save(null, "いつもの分け方に戻しました")}>いつもの分け方に戻す</button>}
         </div>
-      )}
+      ))}
+      {!past && c.raw < 0 && (c.manual
+        ? <div className="btns"><button className="btn sm ghost" onClick={() => save(null, "計算した額に戻しました")}>計算した額に戻す</button></div>
+        : null)}
     </div>
   );
 }
@@ -152,7 +164,7 @@ function CarrySettings({ store, data }: { store: Store; data: AppData }) {
       <div className="panel">
         <div className="grid2">
           <Field label="繰越を入れはじめる月" hint="空なら繰越を入れない"><input type="month" value={s.carryFrom ?? ""} onChange={(e) => setS({ ...s, carryFrom: e.target.value || null })} /></Field>
-          <Field label="予算に入れる上限" hint="こえた分は下の積立に回す"><NumInput value={s.carryCap} onChange={(v) => setS({ ...s, carryCap: v === "" ? 0 : v })} /></Field>
+          <Field label="予算に入れる上限（いつもの分け方）" hint="こえた分は下の積立に回す。月ごとに、上の「前月からの繰越」で変えられる"><NumInput value={s.carryCap} onChange={(v) => setS({ ...s, carryCap: v === "" ? 0 : v })} /></Field>
         </div>
         <Field label="上限をこえた分を回す積立" hint={saves.length ? "「なし」なら上限なしで全部予算に入れる" : "積立の目標がありません。「目標」で積立を足すと選べます"}>
           <Select value={s.carryGoal ?? ""} options={["", ...saves.map((g) => g.id)]} labels={{ "": "なし（全部予算に入れる）", ...Object.fromEntries(saves.map((g) => [g.id, g.name])) }} onChange={(v) => setS({ ...s, carryGoal: v || null })} />

@@ -60,7 +60,7 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
 | `balances` | （消すときだけ `id`） | `date`・`bank`・`cash`・`memo` | `date`・`bank` |
 | `settings` | なし | `safety`・`payday`・`salaryEstimate`・`varCats`・`fixCats`・`dailyCats`・`cards`・`labels`・`carryFrom`・`carryCap`・`carryGoal` | — |
 
-- `budgets` の `category` に `#目標用マイナス` を入れると、その月の目標用マイナスを手で直した値になる（消すと目標マスタから出す値に戻る）。`#繰越` なら、その月の前月からの繰越（予算に入れる額）を手で直した値になる。
+- `budgets` の `category` に `#目標用マイナス` を入れると、その月の目標用マイナスを手で直した値になる（消すと目標マスタから出す値に戻る）。`#繰越` なら、その月の前月からの繰越のうち予算に入れる額になる（残りのプラスの分は積立に回す。消すと、いつもの上限までに戻る）。
 - 明細を Claude から足すときは、`ref` に `claude:` で始まる、ほかと重ならない名前をつける。あとで同じ `ref` で直す・消すができる。`status` を書かなければ予定になる。
 - 明細の `group`（大費目）を書かず `category` を書けば、費目から変動費か固定費かを決める。
 - 大費目の id：口座明細の出金は `variable`・`fixed`・`tatekae`・`other`（`card` はクレカの請求なので Claude からは使わない）、入金は `salary`・`extra`・`refund`・`other`。クレカ明細は `variable`・`fixed`・`tatekae`・`installment`（分割の返済）・`purchase`（分割で買った物）。

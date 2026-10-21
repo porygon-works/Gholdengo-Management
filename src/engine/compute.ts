@@ -371,11 +371,11 @@ export interface Carry {
   safety: number; // 安全残高
   raw: number; // 繰越 ＝ 口座 ＋ 財布 − クレカ − 積立 − 安全残高
   toGoal: number; // 上限をこえて積立に回す額
-  toGoalAuto: number; // 設定から出した、積立に回す額
+  toGoalAuto: number; // 予算に入れる額から出した、積立に回す額（その月の間、臨時の積立をこれに合わせる）
   goal: Goal | null; // 回す先の積立
   budget: number; // 予算に入れる額
-  auto: number; // 手で直していなければ予算に入れる額（raw − toGoal）
-  manual: boolean; // 予算マスタで手で直したか
+  auto: number; // いつもの分け方で予算に入れる額（上限まで。回す積立がなければ全部）
+  manual: boolean; // この月の分け方を決めたか（予算マスタの #繰越）
 }
 
 /** 上限をこえた繰越を回す積立の目標 */
@@ -384,6 +384,7 @@ export const carryGoalOf = (d: Data): Goal | null => d.goals.find((g) => g.id ==
 /**
  * ym の月の、前月からの繰越（§5.8）。前の月の終わりに口座と財布に残るお金から、もう使い道が決まっているお金を引いた残り。
  * プラスなら上限（carryCap）まで予算に入れ、こえた分は積立に回す。マイナスなら全部予算から引く。
+ * 月ごとに、予算に入れる額を決められる（予算マスタの #繰越）。そのときは、残りを積立に回す。
  * 積立に回す額は、その月になったら目標マスタの臨時の積立（carry）に入れる（過ぎた月の額が、あとで変わらないように）
  */
 export function carryFor(d: Data, ym: string): Carry | null {
@@ -396,12 +397,14 @@ export function carryFor(d: Data, ym: string): Carry | null {
   const owed = cardOwedFrom(d, ym), saved = savedBy(d, prev);
   const raw = at.bank + at.wallet - owed - saved - s.safety;
   const goal = carryGoalOf(d);
-  const toGoalAuto = goal && raw > s.carryCap ? raw - Math.max(0, s.carryCap) : 0;
+  const hit = d.budgets.find((b) => b.month === ym && b.category === CARRY_KEY);
+  // いつもの分け方：上限まで予算に入れる（回す積立がなければ全部）
+  const auto = goal && raw > s.carryCap ? Math.max(0, s.carryCap) : raw;
+  // 予算に入れなかったプラスの分を積立に回す（回す積立がなければ、口座に残って次の月にまた繰り越す）
+  const toGoalAuto = goal && raw > 0 ? Math.max(0, raw - (hit ? hit.amount : auto)) : 0;
   const stored = d.goals.flatMap((g) => g.lumps).filter((l) => l.carry && ymOf(l.date) === ym);
   const toGoal = stored.length ? stored.reduce((a, l) => a + l.amount, 0) : toGoalAuto;
-  const auto = raw - toGoal;
-  const hit = d.budgets.find((b) => b.month === ym && b.category === CARRY_KEY);
-  return { end, bank: at.bank, wallet: at.wallet, owed, saved, safety: s.safety, raw, toGoal, toGoalAuto, goal, budget: hit ? hit.amount : auto, auto, manual: !!hit };
+  return { end, bank: at.bank, wallet: at.wallet, owed, saved, safety: s.safety, raw, toGoal, toGoalAuto, goal, budget: hit ? hit.amount : raw - toGoal, auto, manual: !!hit };
 }
 
 export const carryLumpDate = (ym: string) => `${ym}-01`;

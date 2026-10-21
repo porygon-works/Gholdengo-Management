@@ -406,9 +406,13 @@ describe("前月からの繰越（§5.8）", () => {
     const none = carryFor({ ...base(), settings: { ...s, carryGoal: null } }, "2026-11")!;
     expect([none.toGoal, none.budget]).toEqual([0, 109000]);
   });
-  it("手で直した繰越を使う。前の月より前に残高の記録がなければ、あとの記録から戻して出す", () => {
+  it("月ごとに予算に入れる額を決められる。前の月より前に残高の記録がなければ、あとの記録から戻して出す", () => {
+    // この月は全部予算に回す・少しだけ予算に入れる（残りは積立へ）
+    const all = carryFor({ ...base(), budgets: [{ month: "2026-11", category: CARRY_KEY, amount: 109000 }] }, "2026-11")!;
+    expect([all.budget, all.toGoal]).toEqual([109000, 0]);
     const d = { ...base(), budgets: [{ month: "2026-11", category: CARRY_KEY, amount: 5000 }] };
-    expect(carryFor(d, "2026-11")!.budget).toBe(5000);
+    expect([carryFor(d, "2026-11")!.budget, carryFor(d, "2026-11")!.toGoal]).toEqual([5000, 104000]);
+    expect(syncCarryLumps(d, "2026-11")[0].lumps[0].amount).toBe(104000);
     const later = { ...base(), balances: [bal({ date: "2026-11-05", bank: 240000, cash: 10000 })], accounts: [A({ date: "2026-11-03", amount: 10000 })] };
     // 11/3 の出金と、11/4 のセゾンの引落（10月の家賃と分割 75,000円）を戻す
     expect(balanceAt(later, "2026-10-31")).toEqual({ bank: 325000, wallet: 10000 });
