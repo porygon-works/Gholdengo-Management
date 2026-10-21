@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { addMonths, budgetCats, computeMonth, debitsFor, dipBefore, latestBalance, balanceTotal, nextMonthSpend, RESERVE, type CardDebit, type Entry } from "../engine";
+import { addMonths, budgetCats, computeMonth, debitsFor, dipBefore, latestBalance, balanceTotal, nextMonthSpend, RESERVE, type CardDebit } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { Bar, Chip, entryTitle, Field, fromPayKey, md, NumInput, payKeys, payLabels, QUICK_METHODS, Select, signed, toast, yen, ymLabel } from "./common";
 
@@ -100,59 +100,92 @@ function NextMonth({ data, month }: { data: AppData; month: string }) {
   );
 }
 
-/** 引き落とし：その月に口座から出るもの。カードは前の月の利用から見込みを出し、請求額が分かれば確定にする */
-function Debits({ store, data, month }: { store: Store; data: AppData; month: string }) {
+interface DebitLine { key: string; date: string; label: string; amount: number; state: "予定" | "見込み" | "確定"; card?: CardDebit }
+
+/** 表の行にする。カードは「使った分」とリボ・分割の返済を分ける。請求額が確定したら、使った分 ＝ 請求額 − 返済 */
+function debitLines(x: ReturnType<typeof debitsFor>): DebitLine[] {
+  const out: DebitLine[] = x.direct.map((e) => ({ key: e.id, date: e.date, label: entryTitle(e), amount: e.amount, state: e.status === "plan" ? "予定" : "確定" }));
+  for (const c of x.cards) {
+    const repay = c.repays.reduce((a, e) => a + e.amount, 0);
+    const used = c.bill != null ? Math.max(0, c.bill - repay) : c.items.reduce((a, e) => a + e.amount, 0);
+    out.push({ key: c.card.id, date: c.date, label: `${c.card.name}（${+c.closingYm.slice(5)}月分）`, amount: used, state: c.bill != null ? "確定" : "見込み", card: c });
+    for (const e of c.repays) out.push({ key: e.id, date: c.date, label: entryTitle(e), amount: e.amount, state: c.bill != null || e.status !== "plan" ? "確定" : "予定" });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** 今月の引き落とし：その月に口座から出るもの。カードは前の月の利用から見込みを出し、請求額が分かれば確定にする */
+function Debits({ store, data, month, today }: { store: Store; data: AppData; month: string; today: string }) {
   const x = debitsFor(data, month);
-  const [edit, setEdit] = useState<string | null>(null);
+  const lines = debitLines(x);
+  const [edit, setEdit] = useState<CardDebit | null>(null);
   const [val, setVal] = useState<number | "">("");
+  const current = month === today.slice(0, 7);
   const saveBill = async (c: CardDebit, amount: number | null) => {
     const id = data.cardBills.find((b) => b.card === c.card.id && b.pay_date === c.date)?.id;
     if (await store.run(() => actions.saveBill(c.card.id, c.date, amount, id))) { toast(amount == null ? "見込みに戻しました" : `${c.card.name}の請求額を確定にしました`); setEdit(null); }
   };
-  const rowOf = (e: Entry) => line(<>{md(e.date)} {entryTitle(e)} {e.status === "plan" && <Chip kind="warn">予定</Chip>}</>, yen(e.amount));
+  const chip = (s: DebitLine["state"]) => <Chip kind={s === "確定" ? "ok" : "warn"}>{s}</Chip>;
   return (
     <section>
-      <h2>引き落とし <small>{ymLabel(month)}に口座から出るお金</small></h2>
-      <div className="panel">
-        <div className="cathead" style={{ cursor: "default" }}><span className="n">口座から直接</span><span className="s num">{yen(x.directSum)}円</span></div>
-        {x.direct.length ? x.direct.map((e) => <div key={e.id}>{rowOf(e)}</div>) : <div className="note">この月はありません</div>}
-      </div>
-      {x.cards.map((c) => (
-        <div className="panel" key={c.card.id}>
-          <div className="cathead" style={{ cursor: "default" }}>
-            <span className="n">{c.card.name}（{+c.closingYm.slice(5)}月分・{md(c.date)}） {c.bill != null ? <Chip kind="ok">確定</Chip> : <Chip kind="warn">見込み</Chip>}</span>
-            <span className="s num">{yen(c.amount)}円</span>
-          </div>
-          {line("使った分（明細と予定）", yen(c.items.reduce((a, e) => a + e.amount, 0)))}
-          {c.repays.map((e) => <div key={e.id}>{line(<>＋ {entryTitle(e)}</>, yen(e.amount))}</div>)}
-          {c.bill != null && c.bill !== c.estimate && <div className="note">見込み {yen(c.estimate)}円との差 {signed(c.bill - c.estimate)}円（入っていない明細があるかもしれません）</div>}
-          {edit === c.card.id ? (
-            <div className="grid2">
-              <Field label="請求額（確定）"><NumInput value={val} onChange={setVal} /></Field>
-              <div className="btns">
-                <button className="btn sm" onClick={() => val !== "" && saveBill(c, val)}>確定にする</button>
-                <button className="btn ghost sm" onClick={() => setEdit(null)}>やめる</button>
-              </div>
-            </div>
-          ) : (
+      <h2>{current ? "今月の引き落とし" : `${+month.slice(5)}月の引き落とし`} <small>口座から出るお金・カードの行をタップで請求額を入れる</small></h2>
+      <div className="panel scroll">
+        <table className="tbl">
+          <thead><tr><th>日</th><th style={{ textAlign: "left" }}>項目</th><th>金額</th><th>状態</th></tr></thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={l.key} className={l.card ? "tap" : ""} onClick={l.card ? () => { setEdit(l.card!); setVal(l.card!.bill ?? l.card!.estimate); } : undefined}>
+                <td className="num">{md(l.date)}</td>
+                <td style={{ textAlign: "left" }}>{l.label}</td>
+                <td className="num">{yen(l.amount)}</td>
+                <td>{chip(l.state)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr><td /><td style={{ textAlign: "left" }}>合計</td><td className="num">{yen(x.total)}</td><td /></tr></tfoot>
+        </table>
+        {x.cards.filter((c) => c.bill != null && c.items.length > 0 && c.bill !== c.estimate).map((c) => (
+          <div className="note" key={c.card.id}>{c.card.name}：請求額 {yen(c.bill!)}円 と明細・予定の合計 {yen(c.estimate)}円 の差 {signed(c.bill! - c.estimate)}円（入っていない明細があるかもしれません）</div>
+        ))}
+        {edit && (
+          <div style={{ marginTop: 8 }}>
+            <Field label={`${edit.card.name}（${md(edit.date)}）の請求額（返済を含む合計）`}><NumInput value={val} onChange={setVal} /></Field>
             <div className="btns">
-              <button className="btn ghost sm" onClick={() => { setEdit(c.card.id); setVal(c.bill ?? c.estimate); }}>{c.bill != null ? "請求額を直す" : "請求額を入れる"}</button>
-              {c.bill != null && <button className="btn ghost sm" onClick={() => saveBill(c, null)}>見込みに戻す</button>}
+              <button className="btn sm" onClick={() => val !== "" && saveBill(edit, val)}>確定にする</button>
+              {edit.bill != null && <button className="btn ghost sm" onClick={() => saveBill(edit, null)}>見込みに戻す</button>}
+              <button className="btn ghost sm" onClick={() => setEdit(null)}>やめる</button>
             </div>
-          )}
-        </div>
-      ))}
-      <div className="panel">
-        {line("合計引き落とし", `${yen(x.total)}円`, true)}
+          </div>
+        )}
       </div>
     </section>
+  );
+}
+
+/** いまの口座残高と、報告日より後の今月の引き落としを引いた残り */
+function BalanceBox({ data, today, go }: { data: AppData; today: string; go: Props["go"] }) {
+  const bal = latestBalance(data.balances);
+  if (!bal) return <button className="panel" onClick={() => go("balance")} style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit" }}><div className="note">口座の残高を入れると、今月の引き落としのあとに残る額を出します。タップで入れる</div></button>;
+  // 残高の報告日より後に引き落とされるもの（報告した残高には、まだ入っていない）
+  const after = debitLines(debitsFor(data, today.slice(0, 7))).filter((l) => l.date > bal.date).reduce((a, l) => a + l.amount, 0);
+  const left = balanceTotal(bal) - after;
+  return (
+    <div className="panel">
+      {line(`いまの口座残高（${md(bal.date)}に報告・口座＋現金）`, `${yen(balanceTotal(bal))}円`, true)}
+      {line("− 今月これからの引き落とし", `${yen(after)}円`)}
+      {line("引き落としのあとに残る額", <span className={left < 0 ? "neg" : ""}>{signed(left)}円</span>, true)}
+      <div className="note">給与などの入金は入れていません。</div>
+      <div className="btns">
+        <button className="btn ghost sm" onClick={() => go("balance")}>今の残高を入れる</button>
+        <button className="btn ghost sm" onClick={() => go("passbook")}>口座の見通し</button>
+      </div>
+    </div>
   );
 }
 
 export function Dashboard({ store, data, month, today, reviews, go }: Props) {
   const v = computeMonth(data, month, today);
   const b = v.base;
-  const bal = latestBalance(data.balances);
   const rows = v.cats.filter((c) => c.budget || c.used || c.planned);
   // 口座の残高から見た「出金の予定に対して足りなくなる日」だけを警告に使う（口座からの計算はいったんここまで）
   const dip = v.when === "current" ? dipBefore(data, today) : null;
@@ -183,6 +216,7 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
           <div className="legend" style={{ justifyContent: "space-between" }}><span>− 目標用マイナス（リボの返済・貯金）</span><b className="num">{yen(b.goal)}</b></div>
           <div className="note">タップすると設定で直せます</div>
         </button>
+        {v.when !== "past" && <BalanceBox data={data} today={today} go={go} />}
         {dip && <div className="alert bad">{md(dip.date)}に口座が {signed(dip.value)}円 になる見込みです。出金の予定に対して {yen(data.settings.safety - dip.value)}円 足りません。それまでに入金するか、引落の予定を確かめてください。</div>}
         {v.overAllocated && <div className="alert">費目の予算の合計が、今月の予算を {yen(-v.reserveBudget)}円 こえています。「設定」の予算を見直してください。</div>}
       </section>
@@ -238,22 +272,8 @@ export function Dashboard({ store, data, month, today, reviews, go }: Props) {
       </section>
 
       <NextMonth data={data} month={month} />
-      <Debits store={store} data={data} month={month} />
+      <Debits store={store} data={data} month={month} today={today} />
 
-      {v.when !== "past" && (
-        <section>
-          <h2>口座 <button className="btn ghost sm" onClick={() => go("passbook")}>口座の見通し</button></h2>
-          <div className="panel">
-            {bal ? (
-              <div className="legend" style={{ justifyContent: "space-between" }}>
-                <span>いまの残高（{md(bal.date)}に報告・口座＋現金）</span>
-                <b className="num">{yen(balanceTotal(bal))}円</b>
-              </div>
-            ) : <div className="note">残高を入れると、出金の予定に対して口座が足りなくなる日を知らせます。</div>}
-            <div className="btns"><button className="btn ghost sm" onClick={() => go("balance")}>今の残高を入れる</button></div>
-          </div>
-        </section>
-      )}
     </>
   );
 }
