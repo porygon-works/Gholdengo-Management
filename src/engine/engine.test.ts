@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, goalBalanceAt, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, goalMinusAuto,
   goalOutlook, goalSchedule, holidays, isBusinessDay, missingGoalPlans, missingRecurring, monthBase, monthlyFor, nextPayday, nextPayments, normalizeShop,
-  planGoals, recurringDate, recurringDue, ruleFor, shiftBusiness, syncBills,
+  planGoals, recurringDate, recurringDue, syncGoalPlans, ruleFor, shiftBusiness, syncBills,
   type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
 } from "./index";
 
@@ -234,6 +234,24 @@ describe("目標マスタ", () => {
     expect(out.accounts.map((e) => [e.date, e.amount, e.direction])).toEqual([["2026-12-16", 5000, "out"]]); // 残り 5,000円まで
     const had = missingGoalPlans(D({ goals: [g], cards: [C({ card: "saison", group: "installment", category: null, date: "2026-10-31", amount: 10000 })] }), ["2026-11"]);
     expect(had.cards).toHaveLength(0);
+  });
+});
+
+describe("目標から作った予定を目標に合わせる", () => {
+  it("残高や毎月の額が変わると、予定の額も変わる。残り全部の臨時の返済は、その月の返済を引いた額。いらなくなった予定は消す。本人が直した予定はそのまま", () => {
+    const g = G({ id: "g1", balance: 30000, monthly: 10000, card: null, day: 4, as_of: "2026-10-19", lumps: [{ date: "2026-12-15", amount: 0, memo: "賞与から全額" }] });
+    const made = missingGoalPlans(D({ goals: [g] }), ["2026-11", "2026-12", "2027-01"]).accounts.map((e, i) => ({ ...e, id: `p${i}` }));
+    expect(made.map((e) => [e.source_ref, e.amount])).toEqual([["goal:g1:2026-11", 10000], ["goal:g1:2026-12", 10000], ["goal:g1:lump:2026-12-15", 10000]]);
+    // 残高を 40,000 に直した → 臨時の返済は 20,000（11月・12月の返済を引いた残り）
+    const s1 = syncGoalPlans(D({ goals: [{ ...g, balance: 40000 }], accounts: made }), ["2026-11", "2026-12", "2027-01"]);
+    expect(s1.updates).toEqual([{ table: "account_entries", id: "p2", amount: 20000 }]);
+    // 毎月 20,000 にした → 11月 20,000・12月 10,000（残り）・臨時は 0 → 消す
+    const s2 = syncGoalPlans(D({ goals: [{ ...g, monthly: 20000 }], accounts: made }), ["2026-11", "2026-12", "2027-01"]);
+    expect(s2.updates).toEqual([{ table: "account_entries", id: "p0", amount: 20000 }]);
+    expect(s2.removes).toEqual([{ table: "account_entries", id: "p2" }]);
+    // 本人が直した予定はそのまま
+    const s3 = syncGoalPlans(D({ goals: [{ ...g, balance: 40000 }], accounts: made.map((e) => ({ ...e, locked: true })) }), ["2026-11", "2026-12", "2027-01"]);
+    expect([s3.updates, s3.removes]).toEqual([[], []]);
   });
 });
 

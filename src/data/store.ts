@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, applyLabels, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
+  addMonths, applyLabels, syncGoalPlans, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type Goal, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
@@ -151,6 +151,10 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
 
   const cur = ymOf(today);
   const months = [0, 1, 2, 3, 4, 5].map((k) => addMonths(cur, k));
+  // 目標から作った返済の予定の額を、目標マスタに合わせる（残高が減れば、臨時の返済の額も減る）
+  const gs = syncGoalPlans(d, months);
+  for (const u of gs.updates) { await backend.update(u.table, u.id, { amount: u.amount }); wrote = true; }
+  for (const r of gs.removes) { await backend.remove(r.table, r.id); wrote = true; }
   for (const m of [missingRecurring(d, months), missingGoalPlans(d, months)]) {
     if (m.accounts.length) { await backend.insert("account_entries", m.accounts as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
     if (m.cards.length) { await backend.insert("card_entries", m.cards as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
