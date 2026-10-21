@@ -80,7 +80,7 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
       <div className="panel" key={c.cat} id={`cat-${c.cat}`}>
         <button className="cathead" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : c.cat)}>
           <span className="n">{c.cat} <Chip kind={st}>{c.rem < 0 ? `超過 ${yen(-c.rem)}` : `残り ${yen(c.rem)}`}</Chip></span>
-          <span className="s num">{yen(c.used)}{c.planned ? `＋予定${yen(c.planned)}` : ""} / {yen(c.budget)}</span>
+          <span className="s num">{yen(c.used + c.planned)}{c.planned ? `（予定：${yen(c.planned)}円）` : ""} / {yen(c.budget)}</span>
         </button>
         <Bar budget={c.budget} used={c.used} planned={c.planned} />
         {isOpen ? (
@@ -114,7 +114,7 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
             </section>
           )}
           <section>
-            <h2>変動費 <small>使った {yen(v.U)}・予定 {yen(v.P)}</small></h2>
+            <h2>変動費 <small>{yen(v.U + v.P)}円{v.P ? `（予定：${yen(v.P)}円）` : ""}</small></h2>
             {shown.filter((c) => !c.fixed).map(catPanel)}
           </section>
           <section>

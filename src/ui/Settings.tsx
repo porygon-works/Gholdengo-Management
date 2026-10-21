@@ -112,7 +112,7 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   const grid = (cs: string[]) => cs.map((c) => {
     const r = v.cats.find((x) => x.cat === c);
     return [
-      <label key={c + "l"} htmlFor={`b_${c}`}>{c}<span className="note"> 使った {yen((r?.used ?? 0) + (r?.planned ?? 0))}</span></label>,
+      <label key={c + "l"} htmlFor={`b_${c}`}>{c}<span className="note"> 使った {yen((r?.used ?? 0) + (r?.planned ?? 0))}{r?.planned ? `（予定：${yen(r.planned)}円）` : ""}</span></label>,
       <NumInput key={c + "i"} id={`b_${c}`} value={vals[c] ?? ""} onChange={(x) => setVals({ ...vals, [c]: x })} />,
     ];
   });

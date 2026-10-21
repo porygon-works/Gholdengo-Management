@@ -71,6 +71,9 @@ function QuickForm({ store, data, today }: { store: Store; data: AppData; today:
 
 type Row = ReturnType<typeof computeMonth>["cats"][number];
 
+/** 確定と予定の合計。予定があれば下に（予定：○○円） */
+const Spent = ({ used, planned }: { used: number; planned: number }) => <>{yen(used + planned)}{planned ? <span className="note">（予定：{yen(planned)}円）</span> : null}</>;
+
 /** 表の合計の行 */
 function total(rs: Row[], daily: boolean, fixed = false) {
   const sum = (f: (r: Row) => number) => rs.reduce((a, r) => a + f(r), 0);
@@ -79,7 +82,7 @@ function total(rs: Row[], daily: boolean, fixed = false) {
     <tr className="sum">
       <td>合計</td>
       <td className="num">{yen(sum((r) => r.budget))}</td>
-      <td className="num">{yen(sum((r) => r.used))}{sum((r) => r.planned) ? <span className="note">＋{yen(sum((r) => r.planned))}</span> : null}</td>
+      <td className="num"><Spent used={sum((r) => r.used)} planned={sum((r) => r.planned)} /></td>
       <td className={`num ${rem < 0 ? "neg" : ""}`}>{fixed ? yen(sum((r) => Math.max(0, r.budget - r.used))) : signed(rem)}</td>
       {daily && <td />}
     </tr>
@@ -183,7 +186,7 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
           <div className="kpi">
             <div className="lb">{label}</div>
             <div className="v num">{signed(v.T)}<small>円</small></div>
-            <div className="note">変動費で使った {yen(v.U)}・予定 {yen(v.P)}</div>
+            <div className="note">変動費 {yen(v.U + v.P)}円{v.P ? `（予定：${yen(v.P)}円）` : ""}</div>
           </div>
           <div className={`kpi ${v.R < 0 ? "bad" : "main"}`}>
             <div className="lb">残り予算</div>
@@ -226,13 +229,13 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
         <h2>変動費 <small>今月の予算から使う・タップで明細</small></h2>
         <div className="panel scroll">
           <table className="tbl">
-            <thead><tr><th>費目</th><th>予算</th><th>使った＋予定</th><th>残り</th>{v.when !== "past" && <th>1日あたり</th>}</tr></thead>
+            <thead><tr><th>費目</th><th>予算</th><th>使った（予定込み）</th><th>残り</th>{v.when !== "past" && <th>1日あたり</th>}</tr></thead>
             <tbody>
               {rows.filter((r) => !r.fixed).map((r) => (
                 <tr key={r.cat} className="tap" onClick={() => go("ledger", r.cat)}>
                   <td>{r.cat}{r.unclassified > 0 && <> <Chip kind="warn">未分類 {yen(r.unclassified)}</Chip></>}</td>
                   <td className="num">{yen(r.budget)}</td>
-                  <td className="num">{yen(r.used)}{r.planned ? <span className="note">＋{yen(r.planned)}</span> : null}</td>
+                  <td className="num"><Spent used={r.used} planned={r.planned} /></td>
                   <td className={`num ${r.rem < 0 ? "neg" : ""}`}>{signed(r.rem)}</td>
                   {v.when !== "past" && <td className="num"><b>{r.daily == null ? "―" : yen(r.daily)}</b></td>}
                 </tr>
@@ -248,13 +251,13 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
         <h2>固定費 <small>見込み {yen(b.fixed)}円 を給与から引いてある</small></h2>
         <div className="panel scroll">
           <table className="tbl">
-            <thead><tr><th>費目</th><th>見込み</th><th>使った＋予定</th><th>これから</th></tr></thead>
+            <thead><tr><th>費目</th><th>見込み</th><th>使った（予定込み）</th><th>これから</th></tr></thead>
             <tbody>
               {rows.filter((r) => r.fixed).map((r) => (
                 <tr key={r.cat} className="tap" onClick={() => go("ledger", r.cat)}>
                   <td>{r.cat}</td>
                   <td className="num">{yen(r.budget)}</td>
-                  <td className="num">{yen(r.used)}{r.planned ? <span className="note">＋{yen(r.planned)}</span> : null}</td>
+                  <td className="num"><Spent used={r.used} planned={r.planned} /></td>
                   <td className={`num ${r.rem < 0 ? "neg" : ""}`}>{r.rem < 0 ? `超過 ${yen(-r.rem)}` : yen(Math.max(0, r.budget - r.used))}</td>
                 </tr>
               ))}
