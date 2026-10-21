@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, BASE_KEYS, REPAY, categorize, computeMonth, DEFAULT_SETTINGS, FIXED_DEBIT, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf, type BaseKey,
+  addMonths, BASE_KEYS, debitsFor, REPAY, categorize, computeMonth, DEFAULT_SETTINGS, FIXED_DEBIT, findMerges, missingRecurring, RESERVE, ruleFor, todayJST, ymOf, type BaseKey,
   type Balance, type Budget, type CardBill, type Data, type Debt, type Entry, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, type Raw, type Row } from "./backend";
@@ -19,9 +19,9 @@ function toData(raw: Raw): AppData {
     method: r.method as Entry["method"], category: (r.category as string) || null, shop: str(r.shop), item: str(r.item), memo: str(r.memo),
     tatekae: num(r.tatekae), source: r.source as Entry["source"], source_ref: (r.source_ref as string) || null,
     merged_into: (r.merged_into as string) || null, recurring_id: (r.recurring_id as string) || null,
-    not_dup: Array.isArray(r.not_dup) ? (r.not_dup as string[]) : [], locked: !!r.locked, card: (r.card as string) || null,
+    not_dup: Array.isArray(r.not_dup) ? (r.not_dup as string[]) : [], locked: !!r.locked, card: (r.card as string) || null, at: str(r.created_at) || undefined,
   }));
-  const balances: Balance[] = raw.balances.map((r) => ({ id: str(r.id), date: day(r.date), bank: num(r.bank), cash: num(r.cash), paypay: num(r.paypay), memo: str(r.memo) }));
+  const balances: Balance[] = raw.balances.map((r) => ({ id: str(r.id), date: day(r.date), bank: num(r.bank), cash: num(r.cash), paypay: num(r.paypay), memo: str(r.memo), at: str(r.created_at) }));
   const saved = (raw.settings[0]?.data as Partial<Settings>) || {};
   const settings: Settings = { ...DEFAULT_SETTINGS, ...saved };
   if (!settings.cards?.length) settings.cards = DEFAULT_SETTINGS.cards;
@@ -114,6 +114,20 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
     if (e.category || e.locked || e.kind !== "expense" || e.merged_into || (e.source !== "card_flash" && e.source !== "card_statement")) continue;
     const c = categorize(e.shop, d.rules);
     if (c) { await backend.update("entries", e.id, { category: c }); wrote = true; }
+  }
+  // 口座からの自動の引き落とし・入金（定期のお金から作った、金種が口座の予定）は、日付が来たら確定にする
+  for (const e of d.entries) {
+    if (e.status !== "plan" || e.source !== "recurring" || e.method !== "bank" || e.merged_into || e.date > today) continue;
+    await backend.update("entries", e.id, { status: "confirmed" });
+    wrote = true;
+  }
+  // カードの引落日が来たら、請求額がまだなければ見込みの額で確定する（あとから届いた明細で、過ぎた日の残高が変わらないように）
+  for (const ym of [addMonths(cur, -1), cur]) {
+    for (const c of debitsFor(d, ym).cards) {
+      if (c.date > today || c.bill != null || !c.estimate) continue;
+      await backend.insert("card_bills", [{ card: c.card.id, pay_date: c.date, amount: c.estimate, source_ref: `auto:${c.card.id}:${c.date}` }], { onConflict: "pay_date" });
+      wrote = true;
+    }
   }
   if (wrote) return true;
 
@@ -236,6 +250,21 @@ export const actions = {
   },
 
   addBalance: (b: Omit<Balance, "id">) => backend.insert("balances", [b as unknown as Row]),
+
+  /**
+   * 口座か財布の残高を直す。いまの両方の残高（アプリの計算）を報告として入れ、直したほうだけ本当の額にする。
+   * memo に、アプリの計算と本当の額の差を残す（入れ忘れに気づけるように）
+   */
+  fixBalance: (date: string, now: { bank: number; cash: number }, which: "bank" | "cash", actual: number) => {
+    const before = now[which];
+    const name = which === "bank" ? "口座" : "財布";
+    const diff = actual - before;
+    const memo = diff ? `${name}を直した（アプリの計算 ${before.toLocaleString("ja-JP")}円、差 ${diff > 0 ? "+" : ""}${diff.toLocaleString("ja-JP")}円）` : `${name}を確かめた（アプリの計算どおり）`;
+    return backend.insert("balances", [{ date, bank: now.bank, cash: now.cash, paypay: 0, memo, [which]: actual }]);
+  },
+
+  /** ATMで引き出す：口座から財布へ */
+  addAtm: (date: string, amount: number) => backend.insert("entries", [{ kind: "transfer", status: "confirmed", date, amount, method: "bank", category: null, shop: "", item: "ATMで引き出し", memo: "", tatekae: 0, source: "manual", locked: true }]),
   deleteBalance: (id: string) => backend.remove("balances", id),
 
   async saveBudgets(month: string, map: Record<string, number>) {

@@ -24,6 +24,7 @@ export interface Entry {
   not_dup: string[]; // 「別のもの」と決めた相手
   locked: boolean; // 本人が費目などを直した。吸収されても本人の値を残す
   card: string | null; // クレカで払ったときのカード（settings.cards の id）。null は1枚目のカード
+  at?: string; // 入れた時刻（残高を直した日と同じ日の明細を、直す前か後か分けるため）
 }
 
 export interface Balance {
@@ -33,6 +34,7 @@ export interface Balance {
   cash: number;
   paypay: number;
   memo: string;
+  at?: string; // 入れた時刻（同じ日に何度か直したときの順番）
 }
 
 export interface CardBill {

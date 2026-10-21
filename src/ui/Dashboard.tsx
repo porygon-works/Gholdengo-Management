@@ -162,10 +162,10 @@ function AccountFlow({ data, today, go }: { data: AppData; today: string; go: Pr
   return (
     <>
       <div className="cards">
-        <div className="kpi">
-          <div className="lb">いまの残高</div>
-          <div className="v num">{yen(x.now)}<small>円</small></div>
-          <div className="note">{md(x.bal.date)}に報告・口座＋現金</div>
+        <div className="kpi tap" onClick={() => go("balance")} style={{ cursor: "pointer" }}>
+          <div className="lb">口座残高（いま）</div>
+          <div className="v num">{yen(x.now.bank)}<small>円</small></div>
+          <div className="note">財布 {yen(x.now.cash)}円・タップで直す</div>
         </div>
         <div className={`kpi ${x.beforePayday < 0 ? "bad" : "main"}`}>
           <div className="lb">給料日の前日（{md(pd)}）に残る額</div>
@@ -177,7 +177,7 @@ function AccountFlow({ data, today, go }: { data: AppData; today: string; go: Pr
         <table className="tbl">
           <thead><tr><th>日</th><th style={{ textAlign: "left" }}>内容</th><th>入出金</th><th>残高</th></tr></thead>
           <tbody>
-            <tr><td className="num">{md(x.bal.date)}</td><td style={{ textAlign: "left" }}>いまの残高（報告）</td><td /><td className="num">{yen(x.now)}</td></tr>
+            <tr><td className="num">{md(today)}</td><td style={{ textAlign: "left" }}>口座残高（いま）</td><td /><td className="num">{yen(x.now.bank)}</td></tr>
             {x.rows.map((r, i) => {
               const monthEnd = r.date.slice(0, 7) === today.slice(0, 7) && x.rows[i + 1]?.date.slice(0, 7) !== today.slice(0, 7);
               return (
@@ -195,9 +195,9 @@ function AccountFlow({ data, today, go }: { data: AppData; today: string; go: Pr
           </tbody>
           <tfoot><tr><td className="num">{md(pd)}</td><td style={{ textAlign: "left" }}>給料日の前日に残る額</td><td /><td className={neg(x.beforePayday)}>{signed(x.beforePayday)}</td></tr></tfoot>
         </table>
-        <div className="note">給与は給料日に入るので入れていません。現金・PayPay で使う分も入れていません。残高を入れ直すと正確になります。</div>
+        <div className="note">給与は給料日に入るので入れていません。現金で使う分は口座が動かないので入っていません。カードで使った分は引落日に減ります。</div>
         <div className="btns">
-          <button className="btn ghost sm" onClick={() => go("balance")}>今の残高を入れる</button>
+          <button className="btn ghost sm" onClick={() => go("balance")}>残高を直す・ATM</button>
           <button className="btn ghost sm" onClick={() => go("passbook")}>口座の見通し</button>
         </div>
       </div>
