@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, goalBalanceAt, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, goalMinusAuto,
   goalOutlook, goalSchedule, holidays, isBusinessDay, missingGoalPlans, missingRecurring, monthBase, monthlyFor, nextPayday, nextPayments, normalizeShop,
-  planGoals, recurringDate, balanceAt, BUDGET_KEY, carryFor, recurringDue, syncGoalPlans, ruleFor, shiftBusiness, syncBills,
+  planGoals, recurringDate, balanceAt, BUDGET_KEY, carryFor, receivableBefore, recurringDue, syncGoalPlans, ruleFor, shiftBusiness, syncBills,
   type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
 } from "./index";
 
@@ -401,6 +401,19 @@ describe("前月からの繰越（§5.8）と、使えるお金から決める�
     // 始める月より前は、使えるお金がそのまま予算
     const old = monthBase(base(), "2026-10");
     expect([old.input, old.T]).toEqual([false, old.available]);
+  });
+  it("立て替えた分は、返ってくるまで「まだ返ってきていない立替」として残りに足す（使った月も返ってきた月も繰越は0）", () => {
+    // 11月：カードで 5,000円 立て替える（12/26 に引落）。12月に返ってくる
+    const t = C({ date: "2026-11-10", amount: 5000, group: "tatekae", category: null });
+    const d = base();
+    const before = carryFor(d, "2026-12")!.raw;
+    const lent = { ...d, cards: [...d.cards, t] };
+    const c = carryFor(lent, "2026-12")!;
+    expect([c.receivable, c.raw]).toEqual([5000, before]);
+    // 12月に返ってきた・カードから引き落とされた（1月の初め）
+    const back = { ...lent, accounts: [...lent.accounts, A({ date: "2026-12-20", direction: "in", group: "refund", category: null, amount: 5000 })] };
+    expect([carryFor(back, "2027-01")!.receivable, carryFor(back, "2027-01")!.raw]).toEqual([0, carryFor(d, "2027-01")!.raw]);
+    expect(receivableBefore(lent, "2027-01")).toBe(5000);
   });
   it("いつもの残りより減ったら、マイナスの繰越として使えるお金から引く", () => {
     const d = base();
