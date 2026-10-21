@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { budgetCats, computeMonth, goalPlan, INCOME_EXTRA, INCOME_SALARY, isLive, monthBase, OUTSIDE, REPAY, RESERVE, todayJST, type BaseField, type Debt, type Method, type Recurring, type Settings as S } from "../engine";
 import { actions, type AppData, type ImportFile, type Store } from "../data/store";
 import { backend, resetLocal } from "../data/backend";
+import { VERSION_LABEL } from "./version";
 import { ALL_METHODS, Chip, Field, md, METHOD_LABEL, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
 
 type Tab = "budget" | "income" | "recurring" | "rules" | "debts" | "assets" | "data";
@@ -432,6 +433,7 @@ function DataTab({ store, data }: { store: Store; data: AppData }) {
     <section>
       <h2>データ</h2>
       <div className="panel">
+        <div className="note">アプリの版：{VERSION_LABEL}</div>
         <div className="note">保存先：{backend.mode === "supabase" ? "Supabase（ログインした本人だけが読み書きできます）" : "この端末のブラウザの中（お試しモード）"}</div>
         <div className="note">明細 {data.entries.length}件・残高の報告 {data.balances.length}件・定期 {data.recurring.length}件</div>
         <div className="btns"><button className="btn ghost" onClick={download}>すべてのデータを書き出す（JSON）</button></div>

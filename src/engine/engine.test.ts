@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  assetAt, budgetsFor, cardPayDate, cashLimit, dipBefore, goalPlan, monthBase, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
+  assetAt, budgetsFor, cardPayDate, cashLimit, dipBefore, goalPlan, monthBase, monthlyFor, planGoals, cashDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, forecast, holidays,
   isBusinessDay, missingRecurring, normalizeShop, projection, recurringDate, ruleFor, shiftBusiness, type Data, type Entry, type Recurring,
 } from "./index";
 
@@ -319,6 +319,35 @@ describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用�
     const g = goalPlan(d, "2026-11", 3);
     expect(g.rows.map((r) => [r.bonus, r.toDebt, r.toSaving, r.debtLeft])).toEqual([[0, 0, 0, 100000], [300000, 100000, 200000, 0], [0, 0, 0, 0]]);
     expect(g.payoffYm).toBe("2026-12");
+  });
+});
+
+describe("計画をつくる", () => {
+  const debts = [{ id: "d", name: "リボ", balance: 100000, as_of: null, rate: "", min_payment: 0, note: "", planned: false }];
+  const salaryPlan = (ym: string) => E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: `${ym}-15`, category: "給与" });
+  it("毎月の額から：まず借金に回し、返し終えたら貯金。賞与もその月に回す。返済の予定が多い月はその額", () => {
+    const d = D({
+      settings: { ...S, salaryEstimate: 250000 },
+      debts,
+      budgets: [{ month: "2026-11", category: "家賃", amount: 70000 }],
+      entries: [
+        salaryPlan("2026-11"),
+        E({ kind: "expense", status: "plan", method: "card", category: "返済", amount: 30000, date: "2026-11-26" }),
+        E({ kind: "income", status: "plan", method: "bank", amount: 50000, date: "2026-12-15", category: null, item: "賞与" }),
+      ],
+    });
+    const r = planGoals(d, { from: "2026-11", monthly: 20000, useBonus: true, saved: 10000, target: 60000, months: 4 });
+    expect(r.rows.map((x) => [x.put, x.bonus, x.debtLeft, x.saved])).toEqual([[30000, 0, 70000, 10000], [20000, 50000, 0, 10000], [20000, 0, 0, 30000], [20000, 0, 0, 50000]]);
+    expect(r.payoffYm).toBe("2026-12");
+    expect(r.reachYm).toBeNull();
+    expect(r.rows[0].free).toBe(250000 - 70000 - 30000);
+  });
+  it("達成したい月から：その月までに目標に届く、いちばん少ない毎月の額", () => {
+    const d = D({ settings: { ...S, salaryEstimate: 250000 }, debts });
+    const m = monthlyFor(d, { from: "2026-11", useBonus: false, saved: 0, target: 100000 }, "2027-08")!;
+    // 10か月（11月〜8月）で 借金10万＋貯金10万 = 20万 → 毎月 2万
+    expect(m).toBe(20000);
+    expect(planGoals(d, { from: "2026-11", monthly: m, useBonus: false, saved: 0, target: 100000 }).reachYm).toBe("2027-08");
   });
 });
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../data/backend";
+import { VERSION_LABEL } from "./version";
 
 /** Supabase のエラーを、何を直せばよいかが分かる言葉にする */
 function explain(message: string): string {
@@ -39,6 +40,7 @@ export function Login() {
       <button className="btn" disabled={busy}>ログイン</button>
       {msg && <div className="alert bad">{msg.text}<div className="note">エラーの内容：{msg.raw}</div></div>}
       <div className="note">つなぎ先：{host}</div>
+      <div className="note">{VERSION_LABEL}</div>
     </form>
   );
 }
