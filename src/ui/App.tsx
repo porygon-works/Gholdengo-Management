@@ -87,7 +87,7 @@ function Main() {
             }} open={(entry) => setSheet({ type: "account", entry })} onOpen={openEntry} />}
             {screen === "ledger" && <Ledger data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "new" })} />}
             {screen === "plans" && <Plans data={data} month={month} today={today} onOpen={openEntry} onAdd={() => setSheet({ type: "new", plan: true })} />}
-            {screen === "settings" && <SettingsView store={store} data={data} month={month} />}
+            {screen === "settings" && <SettingsView store={store} data={data} month={month} onOpen={openEntry} />}
             {screen === "review" && <ReviewView store={store} data={data} today={today} onOpen={openEntry} />}
             {screen === "goals" && <GoalsView data={data} today={today} />}
             {screen === "passbook" && <Passbook data={data} today={today} onOpen={openEntry} />}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  accountFlow, accountNow, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, goalMinusAuto,
+  ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, goalBalanceAt, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, goalMinusAuto,
   goalOutlook, goalSchedule, holidays, isBusinessDay, missingGoalPlans, missingRecurring, monthBase, monthlyFor, nextPayday, nextPayments, normalizeShop,
   planGoals, recurringDate, ruleFor, shiftBusiness, syncBills,
   type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
@@ -192,12 +192,20 @@ describe("目標マスタ", () => {
     const m = goalSchedule(g, S, "2026-10", 4);
     expect(m.map((x) => [x.ym, x.pay, x.lump, x.left])).toEqual([["2026-11", 10000, 0, 25000], ["2026-12", 10000, 15000, 0], ["2027-01", 0, 0, 0], ["2027-02", 0, 0, 0]]);
     expect(goalOutlook(D({ goals: [g] }), "2026-10")[0].doneYm).toBe("2026-12");
+    // 残高は返済の日が来るたびに見込みで減る
+    expect([goalBalanceAt(g, S, "2026-11-03"), goalBalanceAt(g, S, "2026-11-04"), goalBalanceAt(g, S, "2026-12-16")]).toEqual([35000, 25000, 0]);
+    // 額を入れていない臨時の返済は、残り全部
+    const all = G({ balance: 35000, monthly: 10000, card: "saison", lumps: [{ date: "2026-12-16", amount: 0, memo: "賞与から全額" }] });
+    expect(goalSchedule(all, S, "2026-11", 2).map((x) => [x.pay, x.lump, x.left])).toEqual([[10000, 0, 25000], [10000, 15000, 0]]);
+    expect(missingGoalPlans(D({ goals: [all] }), ["2026-12"]).accounts.map((e) => e.amount)).toEqual([15000]);
   });
   it("積立：始める月から目標額まで。目標用マイナスはその月に動いている目標の合計", () => {
     const save = G({ kind: "save", balance: 0, target: 50000, monthly: 20000, start_month: "2027-01" });
     expect(goalSchedule(save, S, "2026-12", 5).map((x) => x.pay)).toEqual([0, 20000, 20000, 10000, 0]);
     const d = D({ goals: [save, G({ balance: 30000, monthly: 10000, card: "saison" })] });
     expect([goalMinusAuto(d, "2026-11"), goalMinusAuto(d, "2027-01")]).toEqual([10000, 30000]);
+    // 先の月も、残高の日から数えて0になったら返済は終わる（30,000円・毎月10,000円 → 11〜1月）
+    expect([goalMinusAuto(d, "2027-01"), goalMinusAuto(d, "2027-02")]).toEqual([30000, 20000]);
   });
   it("返済の予定を作る：カードなら締め月の最後の日の分割（返済）、臨時は口座の出金。もう同じ締め月にあれば作らない", () => {
     const g = G({ id: "g1", balance: 25000, monthly: 10000, card: "saison", lumps: [{ date: "2026-12-16", amount: 15000, memo: "賞与から" }] });
@@ -291,6 +299,15 @@ describe("計画をつくる", () => {
     const m = monthlyFor(base(), { from: "2026-11", useBonus: false, saved: 0, target: 60000 }, "2027-04")!;
     expect(m).toBe(20000);
     expect(monthlyFor(base(), { from: "2026-11", useBonus: false, saved: 0, target: 1e9 }, "2027-01")).toBeNull();
+  });
+});
+
+describe("区分", () => {
+  it("大費目の名前を変えると、画面で使う名前の表が変わる（計算は id のまま）", () => {
+    applyLabels({ ...S, labels: { variable: "やりくり費", installment: "リボ" } });
+    expect([ACCOUNT_GROUP_LABEL.variable, CARD_GROUP_LABEL.variable, CARD_GROUP_LABEL.installment, PAY_GROUP_LABEL.installment, PAY_GROUP_LABEL.fixed]).toEqual(["やりくり費", "やりくり費", "リボ", "リボ", "固定費"]);
+    applyLabels(S);
+    expect([ACCOUNT_GROUP_LABEL.variable, PAY_GROUP_LABEL.installment]).toEqual(["変動費", "分割の返済"]);
   });
 });
 

@@ -22,7 +22,7 @@ export const ownCost = (e: { amount: number; tatekae?: number }) => Math.max(0, 
  */
 export type Pay = string;
 export const payOptions = (s: Settings): Pay[] => [...s.cards.map((c) => `card:${c.id}`), "wallet", "paypay", "bank"];
-export const payLabels = (s: Settings): Record<Pay, string> => ({ ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, c.name])), wallet: "現金", paypay: "PayPay", bank: "口座" });
+export const payLabels = (s: Settings): Record<Pay, string> => ({ ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, `クレカ（${c.name}）`])), wallet: "現金", paypay: "PayPay", bank: "口座" });
 export const cardOfPay = (p: Pay) => (p.startsWith("card:") ? p.slice(5) : null);
 
 // ---------- 通知 ----------
@@ -68,14 +68,21 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   );
 }
 
-/** 数だけを入れる欄。空のときは "" を返す */
-export function NumInput({ value, onChange, placeholder, autoFocus, id }: { value: number | ""; onChange: (v: number | "") => void; placeholder?: string; autoFocus?: boolean; id?: string }) {
-  return (
+/** 数だけを入れる欄。空のときは "" を返す。金額は右寄せで頭に ¥（日付などの数は plain） */
+export function NumInput({ value, onChange, placeholder, autoFocus, id, plain }: { value: number | ""; onChange: (v: number | "") => void; placeholder?: string; autoFocus?: boolean; id?: string; plain?: boolean }) {
+  const input = (
     <input id={id} className="num" type="text" inputMode="numeric" pattern="[0-9]*" autoFocus={autoFocus} placeholder={placeholder}
-      value={value === "" ? "" : String(value)}
+      value={value === "" ? "" : plain ? String(value) : value.toLocaleString("ja-JP")}
       onChange={(e) => { const v = e.target.value.normalize("NFKC").replace(/[^0-9]/g, ""); onChange(v === "" ? "" : Number(v)); }} />
   );
+  return plain ? input : <span className="money">{input}</span>;
 }
+
+/** 金額の表示：¥ をつける */
+export const money = (n: number) => (n < 0 ? "−¥" + yen(-n) : "¥" + yen(n));
+
+/** 確定と予定の合計。予定があれば（予定の額）を添える。見出しに「（）内は予定」と書く */
+export const Spent = ({ used, planned }: { used: number; planned: number }) => <>{money(used + planned)}{planned ? <span className="note">（{yen(planned)}）</span> : null}</>;
 
 export function Select<T extends string>({ value, options, onChange, labels }: { value: T; options: readonly T[]; onChange: (v: T) => void; labels?: Partial<Record<T, string>> }) {
   return (

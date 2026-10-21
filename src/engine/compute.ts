@@ -2,7 +2,7 @@ import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
 import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost } from "./schedule";
 import {
-  budgetCats, GOAL_KEY, isFixedCat, RESERVE,
+  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, GOAL_KEY, isFixedCat, RESERVE,
   type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
 } from "./types";
 
@@ -122,14 +122,17 @@ export function goalPayDate(g: Goal, ym: string, s: Settings): string {
  */
 export function goalSchedule(g: Goal, s: Settings, fromYm: string, n: number): GoalMonth[] {
   const out: GoalMonth[] = [];
-  const start = g.start_month ?? fromYm;
+  // 始める月がなければ、返済は残高の日の月から（見ている月からにすると、先の月でも残高が減っていない）
+  const start = g.start_month ?? (g.kind === "repay" && g.as_of ? ymOf(g.as_of) : fromYm);
   if (g.kind === "repay") {
     let left = g.balance;
     // 残高の日より後の支払いから数える
     let ym = g.as_of && ymOf(g.as_of) > start ? ymOf(g.as_of) : start;
     if (g.as_of && goalPayDate(g, ym, s) <= g.as_of) ym = addMonths(ym, 1);
     for (let k = 0; k < 240; k++, ym = addMonths(ym, 1)) {
-      const lump = g.lumps.filter((l) => ymOf(l.date) === ym && (!g.as_of || l.date > g.as_of)).reduce((a, l) => a + l.amount, 0);
+      // 額を入れていない臨時の返済は、残り全部
+      const ls = g.lumps.filter((l) => ymOf(l.date) === ym && (!g.as_of || l.date > g.as_of));
+      const lump = ls.some((l) => !l.amount) ? Infinity : ls.reduce((a, l) => a + l.amount, 0);
       const stop = g.end_month && ym > g.end_month;
       const pay = left > 0 && !stop ? Math.min(g.monthly, left) : 0;
       const l2 = Math.min(lump, Math.max(0, left - pay));
@@ -191,7 +194,7 @@ export function missingGoalPlans(d: Data, months: string[]) {
     for (const m of sched) {
       let room = m.lump;
       for (const l of g.lumps.filter((x) => ymOf(x.date) === m.ym && (!g.as_of || x.date > g.as_of)).sort((a, b) => a.date.localeCompare(b.date))) {
-        const amount = Math.min(l.amount, room);
+        const amount = Math.min(l.amount || Infinity, room);
         room -= amount;
         if (amount <= 0 || have.has(lumpRef(g, l.date))) continue;
         accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}（${l.memo || "臨時の返済"}）`, memo: "", date: l.date, amount, source: "goal", source_ref: lumpRef(g, l.date), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
@@ -199,6 +202,21 @@ export function missingGoalPlans(d: Data, months: string[]) {
     }
   }
   return { accounts, cards };
+}
+
+/**
+ * 返済の目標の、その日の残高の見込み。入れた残高（as_of の日）から、その日までに来た毎月の返済と臨時の返済を引く。
+ * 本当の残高が分かったら、目標の残高を直す
+ */
+export function goalBalanceAt(g: Goal, s: Settings, date: string): number {
+  if (g.kind !== "repay") return g.balance;
+  let left = g.balance;
+  for (const m of goalSchedule(g, s, g.as_of ? ymOf(g.as_of) : ymOf(date), 240)) {
+    if (m.ym > ymOf(date)) break;
+    if (goalPayDate(g, m.ym, s) <= date) left -= m.pay;
+    left -= g.lumps.filter((l) => ymOf(l.date) === m.ym && l.date <= date).length ? m.lump : 0;
+  }
+  return Math.max(0, left);
 }
 
 export interface GoalOutlook { goal: Goal; months: GoalMonth[]; doneYm: string | null }
@@ -392,6 +410,21 @@ export function accountFlow(d: Data, today: string, to?: string) {
 export type PayGroup = "fixed" | "variable" | "installment" | "tatekae" | "other" | "diff";
 export const PAY_GROUP_LABEL: Record<PayGroup, string> = { fixed: "固定費", variable: "変動費", installment: "分割の返済", tatekae: "立替", other: "その他", diff: "クレカの確定の額との差" };
 
+/** 大費目の名前の初めの値（設定の「区分」で変えられる。計算は id で行うので、名前を変えても計算は変わらない） */
+export const GROUP_LABEL_DEFAULTS: Record<string, string> = {
+  variable: "変動費", fixed: "固定費", tatekae: "立替", card: "クレカ支払い", other: "その他",
+  salary: "給与", extra: "追加予算", refund: "立替の返金", installment: "分割（返済）", purchase: "分割（購入）",
+};
+
+/** 設定の大費目の名前を、画面で使う名前の表に入れる（読み込むたびに呼ぶ） */
+export function applyLabels(s: Settings) {
+  const l = { ...GROUP_LABEL_DEFAULTS, ...(s.labels ?? {}) };
+  for (const k of Object.keys(ACCOUNT_GROUP_LABEL) as (keyof typeof ACCOUNT_GROUP_LABEL)[]) ACCOUNT_GROUP_LABEL[k] = l[k];
+  for (const k of Object.keys(CARD_GROUP_LABEL) as (keyof typeof CARD_GROUP_LABEL)[]) CARD_GROUP_LABEL[k] = l[k];
+  for (const k of ["fixed", "variable", "tatekae", "other"] as const) PAY_GROUP_LABEL[k] = l[k];
+  PAY_GROUP_LABEL.installment = s.labels?.installment ?? "分割の返済";
+}
+
 export interface PayItem {
   date: string; // 口座から出る日（クレカは引落日）
   name: string;
@@ -453,7 +486,8 @@ function repayDue(d: Data, ym: string): number {
  */
 export function planGoals(d: Data, p: PlanInput): PlanResult {
   const n = p.months ?? 36;
-  let debt = d.goals.filter((g) => g.active && g.kind === "repay").reduce((a, g) => a + g.balance, 0);
+  const before = `${addMonths(p.from, -1)}-31`;
+  let debt = d.goals.filter((g) => g.active && g.kind === "repay").reduce((a, g) => a + goalBalanceAt(g, d.settings, before), 0);
   let saved = p.saved;
   const rows: PlanRow[] = [];
   let payoffYm: string | null = debt <= 0 ? p.from : null, reachYm: string | null = null, minFree = Infinity;

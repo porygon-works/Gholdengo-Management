@@ -28,7 +28,7 @@ export function Plans({ data, month, today, onOpen, onAdd }: { data: AppData; mo
   return (
     <>
       <section>
-        <div className="btns"><button className="btn" onClick={onAdd}>＋ 予定を入れる</button></div>
+        <div className="btns"><button className="btn" onClick={onAdd}>追加</button></div>
         <div className="note">給与・賞与・急な入金や、決まっている大きな出費を入れます。定期マスタと目標マスタから作った予定は、計上日が来たら自動で確定になります（三井の予定は、メールの明細とまとまります）。</div>
       </section>
       {overdue.length > 0 && (

@@ -121,10 +121,18 @@ h2 small { font-weight: 400; color: var(--mut); font-size: 12px; }
 button.alert { text-align: left; cursor: pointer; width: 100%; }
 
 /* 入力 */
-.field { display: grid; gap: 4px; min-width: 0; }
+.field { display: grid; gap: 4px; min-width: 0; align-content: start; }
 .flabel { font-size: 12px; color: var(--mut); }
 .field input, .field select, .field textarea, .quick input, .quick select { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 9px 10px; width: 100%; min-width: 0; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+/* 入力欄の高さをそろえる（select・日付・数で高さが違うと横に並んだ欄がずれる） */
+.field input, .field select, .quick input, .quick select { height: 40px; box-sizing: border-box; line-height: 20px; }
+.field textarea { box-sizing: border-box; }
+@supports (-webkit-touch-callout: none) { .field input[type="date"], .field input[type="month"] { -webkit-appearance: none; appearance: none; display: flex; align-items: center; } }
+/* 金額の欄：右寄せで頭に ¥ */
+.money { position: relative; display: block; }
+.money::before { content: "¥"; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--mut); pointer-events: none; }
+.money input { text-align: right; padding-left: 24px !important; }
 .quick { display: grid; gap: 10px; }
 .seg { display: flex; flex-wrap: wrap; gap: 6px; }
 .seg button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
@@ -147,3 +155,9 @@ pre.mail { white-space: pre-wrap; font-size: 12px; background: var(--sunk); padd
 
 @media (max-width: 420px) { .kpi .v { font-size: 21px; } .big .v { font-size: 26px; } }
 @media (prefers-reduced-motion: no-preference) { .sheet { animation: up .18s ease-out; } @keyframes up { from { transform: translateY(24px); opacity: .6; } } }
+/* 区分の表の中の入力欄 */
+.kinds input:not([type="checkbox"]), .kinds select, .panel .tbl input:not([type="checkbox"]) { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 8px; width: 100%; min-width: 6em; height: 36px; box-sizing: border-box; }
+.kindrow { display: grid; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.kindctl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.kindctl select { width: auto; min-width: 7em; }
+.kindctl .btn { margin-left: auto; }
