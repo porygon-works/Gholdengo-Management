@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, applyLabels, syncGoalPlans, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
+  addMonths, applyLabels, syncGoalPlans, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, syncCarryLumps, CARRY_KEY, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type Goal, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
@@ -46,7 +46,7 @@ function toData(raw: Raw): AppData {
   const goals: Goal[] = [...raw.goals].sort((a, b) => num(a.sort) - num(b.sort)).map((r) => ({
     id: str(r.id), kind: r.kind === "save" ? "save" : "repay", name: str(r.name), card: opt(r.card), balance: num(r.balance), as_of: r.as_of ? day(r.as_of) : null,
     target: num(r.target), monthly: num(r.monthly), day: num(r.day) || 27, start_month: opt(r.start_month), end_month: opt(r.end_month),
-    lumps: Array.isArray(r.lumps) ? (r.lumps as Goal["lumps"]).map((l) => ({ date: day(l.date), amount: num(l.amount), memo: str(l.memo) })) : [], active: r.active !== false, sort: num(r.sort),
+    lumps: Array.isArray(r.lumps) ? (r.lumps as Goal["lumps"]).map((l) => ({ date: day(l.date), amount: num(l.amount), memo: str(l.memo), ...(l.carry ? { carry: true } : {}) })) : [], active: r.active !== false, sort: num(r.sort),
   }));
   const budgets: Budget[] = raw.budgets.map((r) => ({ month: str(r.month), category: str(r.category), amount: num(r.amount) }));
   const rules: Rule[] = raw.rules.map((r) => ({ id: str(r.id), pattern: str(r.pattern), category: str(r.category) }));
@@ -159,10 +159,25 @@ async function migrate6(raw: Raw, d: AppData): Promise<boolean> {
   return true;
 }
 
+/**
+ * 版6まで → 版7：前月からの繰越（§5.8）を今月から入れる。上限をこえた分は1つ目の積立の目標に回す。
+ * 始める月のない積立は今月からにする（たまった額を月ごとに数えるため）
+ */
+async function migrate7(raw: Raw, d: AppData, today: string): Promise<boolean> {
+  const saved = raw.settings[0]?.data as Partial<Settings> | undefined;
+  if (!saved || (saved.version ?? 1) >= 7) return false;
+  const cur = ymOf(today);
+  for (const g of d.goals) if (g.kind === "save" && !g.start_month) await backend.update("goals", g.id, { start_month: cur });
+  const goal = d.goals.find((g) => g.active && g.kind === "save");
+  await backend.upsertKeyed("settings", [{ data: { ...d.settings, version: 7, carryFrom: cur, carryGoal: goal?.id ?? null } }]);
+  return true;
+}
+
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); return true; }
   if (await migrate4(raw, d)) return true;
   if (await migrate6(raw, d)) return true;
+  if (await migrate7(raw, d, today)) return true;
   if (await copyV2(raw, d)) return true;
   let wrote = false;
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }
@@ -199,6 +214,11 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (bills.inserts.length) await backend.insert("account_entries", bills.inserts as unknown as Row[], { onConflict: "source_ref" });
   for (const u of bills.updates) await backend.update("account_entries", u.id, u.patch as Row);
   if (bills.inserts.length || bills.updates.length) return true;
+
+  // 今月の繰越のうち上限をこえた分を、積立の目標の臨時の積立にする（クレカの請求が決まってから）
+  const carry = syncCarryLumps(d, cur);
+  for (const c of carry) await backend.update("goals", c.id, { lumps: c.lumps });
+  if (carry.length) return true;
 
   const { merges } = findMerges(d.cards);
   for (const m of merges) {
@@ -385,6 +405,9 @@ export const actions = {
   /** その月の目標用マイナスを手で直す。null なら目標マスタから出す値に戻す */
   saveGoalMinus: (month: string, amount: number | null) =>
     amount == null ? backend.removeBudget(month, GOAL_KEY) : backend.upsertKeyed("budgets", [{ month, category: GOAL_KEY, amount }]),
+  /** その月の前月からの繰越を手で直す。null なら計算した値に戻す */
+  saveCarry: (month: string, amount: number | null) =>
+    amount == null ? backend.removeBudget(month, CARRY_KEY) : backend.upsertKeyed("budgets", [{ month, category: CARRY_KEY, amount }]),
 
   saveSettings: (s: Settings) => backend.upsertKeyed("settings", [{ data: s }]),
 

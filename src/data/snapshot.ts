@@ -17,7 +17,8 @@ export function summary(d: AppData, today: string) {
     today,
     thisMonth: {
       month: ym, budget: v.T, remaining: v.R, variableUsed: v.U, variablePlanned: v.P, fixedOver: v.fixedOver,
-      base: { salary: v.base.salary, extra: v.base.extra, fixed: v.base.fixed, goalMinus: v.base.goal, goalMinusManual: v.base.goalManual },
+      base: { salary: v.base.salary, extra: v.base.extra, carry: v.base.carry, fixed: v.base.fixed, goalMinus: v.base.goal, goalMinusManual: v.base.goalManual },
+      carry: v.base.carryInfo && { ...v.base.carryInfo, goal: v.base.carryInfo.goal?.name ?? null },
       categories: v.cats.filter((c) => c.budget || c.used || c.planned).map((c) => ({ category: c.cat, fixed: c.fixed, budget: c.budget, used: c.used, planned: c.planned, remaining: c.rem })),
     },
     account: f && {
@@ -25,10 +26,10 @@ export function summary(d: AppData, today: string) {
       flow: f.rows.map((r) => ({ date: r.date, name: r.entry.name || r.entry.category, amount: r.delta, balanceAfter: r.balance, status: r.entry.status, group: r.entry.group })),
     },
     nextMonthPayments: { month: next, total: n.total, groups: n.groups.map((g) => ({ group: PAY_GROUP_LABEL[g.group], amount: g.amount, items: g.items.map((x) => ({ date: x.date, name: x.name, from: x.from, amount: x.amount, plan: x.plan })) })) },
-    nextMonthBudget: { month: next, budget: nb.T, base: { salary: nb.salary, extra: nb.extra, fixed: nb.fixed, goalMinus: nb.goal } },
+    nextMonthBudget: { month: next, budget: nb.T, base: { salary: nb.salary, extra: nb.extra, carry: nb.carry, fixed: nb.fixed, goalMinus: nb.goal } },
     goals: goalOutlook(d, ym, 36).map((o) => ({
       name: o.goal.name, kind: o.goal.kind, balanceNow: goalBalanceAt(o.goal, d.settings, today), monthly: o.goal.monthly, doneMonth: o.doneYm,
-      schedule: o.months.filter((m) => m.pay || m.lump).slice(0, 12).map((m) => ({ month: m.ym, pay: m.pay, lump: m.lump, left: m.left })),
+      schedule: o.months.filter((m) => m.pay || m.lump || m.carry).slice(0, 12).map((m) => ({ month: m.ym, pay: m.pay, lump: m.lump, carry: m.carry, left: m.left })),
     })),
   };
 }

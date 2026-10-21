@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, goalBalanceAt, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, goalMinusAuto,
   goalOutlook, goalSchedule, holidays, isBusinessDay, missingGoalPlans, missingRecurring, monthBase, monthlyFor, nextPayday, nextPayments, normalizeShop,
-  planGoals, recurringDate, recurringDue, syncGoalPlans, ruleFor, shiftBusiness, syncBills,
+  planGoals, recurringDate, balanceAt, carryFor, CARRY_KEY, savedBy, syncCarryLumps, recurringDue, syncGoalPlans, ruleFor, shiftBusiness, syncBills,
   type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
 } from "./index";
 
@@ -365,5 +365,52 @@ describe("お店→費目のルール", () => {
   it("中身の分からないお店は覚えない", () => {
     expect(ruleFor("Mastercard加盟店")).toBeNull();
     expect(ruleFor("サンプルストア／ｉＤ")).toBe("サンプルストア");
+  });
+});
+
+describe("前月からの繰越（§5.8）", () => {
+  const s = { ...S, safety: 10000, carryFrom: "2026-11", carryCap: 20000, carryGoal: "s1" };
+  const save = G({ id: "s1", kind: "save", name: "積立", card: null, balance: 50000, as_of: null, monthly: 20000, start_month: "2026-10" });
+  const base = () => D({
+    settings: s, goals: [save],
+    balances: [bal({ date: "2026-10-19", bank: 300000, cash: 10000 })],
+    accounts: [A({ date: "2026-10-25", amount: 50000 })],
+    cards: [
+      C({ date: "2026-10-10", amount: 1000 }), // 三井 11/26 に引落
+      C({ card: "saison", date: "2026-10-05", amount: 70000, group: "fixed", category: "家賃" }), // セゾン 11/4 に引落
+      C({ card: "saison", date: "2026-10-31", amount: 5000, group: "installment", category: null }), // 分割（返済）は目標用マイナスで数える
+      C({ date: "2026-11-02", amount: 2000 }), // 11月に使った分は11月の予算
+    ],
+  });
+  it("口座＋財布 − 前の月までのクレカ − 積立 − 安全残高。上限をこえた分は積立へ", () => {
+    const c = carryFor(base(), "2026-11")!;
+    expect([c.bank, c.wallet, c.owed, c.saved]).toEqual([250000, 10000, 71000, 70000]);
+    expect([c.raw, c.toGoal, c.budget]).toEqual([109000, 89000, 20000]);
+    expect(monthBase(base(), "2026-11").carry).toBe(20000);
+    expect(monthBase(base(), "2026-10").carryInfo).toBeNull();
+  });
+  it("積立に回した分は臨時の積立として残し、目標用マイナスには入れない", () => {
+    const d = base();
+    const out = syncCarryLumps(d, "2026-11");
+    expect(out).toEqual([{ id: "s1", lumps: [{ date: "2026-11-01", amount: 89000, memo: "前月からの繰越（上限をこえた分）", carry: true }] }]);
+    const d2 = { ...d, goals: [{ ...save, lumps: out[0].lumps }] };
+    expect(syncCarryLumps(d2, "2026-11")).toEqual([]);
+    expect(goalMinusAuto(d2, "2026-11")).toBe(20000);
+    expect(savedBy(d2, "2026-11")).toBe(179000);
+    // 目標額に届いていても、回した繰越はたまった額に数える
+    expect(savedBy({ ...d2, goals: [{ ...d2.goals[0], target: 60000 }] }, "2026-11")).toBe(60000 + 89000);
+  });
+  it("マイナスなら全部予算から引く。積立がなければ上限なしで全部予算に入れる", () => {
+    const neg = carryFor({ ...base(), settings: { ...s, safety: 300000 } }, "2026-11")!;
+    expect([neg.raw, neg.toGoal, neg.budget]).toEqual([-181000, 0, -181000]);
+    const none = carryFor({ ...base(), settings: { ...s, carryGoal: null } }, "2026-11")!;
+    expect([none.toGoal, none.budget]).toEqual([0, 109000]);
+  });
+  it("手で直した繰越を使う。前の月より前に残高の記録がなければ、あとの記録から戻して出す", () => {
+    const d = { ...base(), budgets: [{ month: "2026-11", category: CARRY_KEY, amount: 5000 }] };
+    expect(carryFor(d, "2026-11")!.budget).toBe(5000);
+    const later = { ...base(), balances: [bal({ date: "2026-11-05", bank: 240000, cash: 10000 })], accounts: [A({ date: "2026-11-03", amount: 10000 })] };
+    // 11/3 の出金と、11/4 のセゾンの引落（10月の家賃と分割 75,000円）を戻す
+    expect(balanceAt(later, "2026-10-31")).toEqual({ bank: 325000, wallet: 10000 });
   });
 });

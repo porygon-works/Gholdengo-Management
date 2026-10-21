@@ -106,6 +106,12 @@ h2 small { font-weight: 400; color: var(--mut); font-size: 12px; }
 .cathead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; cursor: pointer; padding: 2px 0; background: none; border: 0; width: 100%; text-align: left; }
 .cathead .n { font-weight: 700; }
 .cathead .s { font-size: 13px; color: var(--mut); }
+.cathead .rem { font-size: 20px; font-weight: 700; white-space: nowrap; }
+.cathead .rem small { font-size: 12px; font-weight: 500; margin-right: 6px; color: var(--mut); }
+.cathead .rem.ok { color: var(--good); }
+.cathead .rem.warn { color: var(--warn); }
+.cathead .rem.bad { color: var(--bad); }
+.catnums { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--mut); margin: 2px 0 6px; }
 .unc { background: var(--warn-soft); border: 1px dashed var(--warn); }
 .btn { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); border-radius: 10px; padding: 9px 14px; font-weight: 700; cursor: pointer; }
 .btn:disabled { opacity: .5; cursor: default; }

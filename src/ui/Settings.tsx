@@ -50,7 +50,7 @@ export function SettingsView({ store, data, month, onOpen }: { store: Store; dat
 
 // ---------- 予算 ----------
 
-/** 予算の元（給与・追加予算・固定費・目標用マイナス）。目標用マイナスだけ、この月だけ手で直せる */
+/** 予算の元（給与・追加予算・前月からの繰越・固定費・目標用マイナス）。繰越と目標用マイナスは、この月だけ手で直せる */
 function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; month: string }) {
   const b = monthBase(data, month);
   const [edit, setEdit] = useState(false);
@@ -70,6 +70,7 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
       <div className="panel">
         {line("給与", b.salary, "その月の口座明細の入金のうち、大費目が給与のもの（予定を含む）。直すときは明細や予定を直す")}
         {line("＋ 追加予算", b.extra, "その月の口座明細の入金のうち、大費目が追加予算のもの（イベチケなど）")}
+        {b.carryInfo && <CarryLine store={store} data={data} month={month} />}
         {line("− 固定費", b.fixed, "固定費の費目の予算（見込み）の合計。下の「固定費」で直す")}
         <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
           <div className="legend" style={{ justifyContent: "space-between" }}>
@@ -96,6 +97,72 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
   );
 }
 
+/** 前月からの繰越（§5.8）の内訳。この月だけ手で直せる */
+function CarryLine({ store, data, month }: { store: Store; data: AppData; month: string }) {
+  const c = monthBase(data, month).carryInfo!;
+  const [edit, setEdit] = useState(false);
+  const [val, setVal] = useState<number | "">("");
+  const save = async (amount: number | null) => {
+    if (await store.run(() => actions.saveCarry(month, amount))) { toast(amount == null ? "計算した額に戻しました" : "保存しました"); setEdit(false); }
+  };
+  const row = (label: string, v: number) => <tr><td>{label}</td><td className="num">{money(v)}</td></tr>;
+  return (
+    <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
+      <div className="legend" style={{ justifyContent: "space-between" }}>
+        <span><b style={{ color: "var(--ink)" }}>＋ 前月からの繰越</b> {c.manual ? <Chip kind="warn">この月だけ直した</Chip> : <Chip>口座から計算</Chip>}</span>
+        <b className={`num ${c.budget < 0 ? "neg" : ""}`}>{signed(c.budget)}円</b>
+      </div>
+      <table className="tbl">
+        <tbody>
+          {row(`${md(c.end)}の口座（見込み）`, c.bank)}
+          {c.wallet !== 0 && row("＋ 財布", c.wallet)}
+          {row("− まだ引き落とされていないクレカ（前の月までに使った分）", c.owed)}
+          {c.saved !== 0 && row("− 積立にたまった額（口座に置いたまま）", c.saved)}
+          {c.safety !== 0 && row("− 安全残高", c.safety)}
+          {c.toGoal > 0 && row(`− 上限をこえた分（「${c.goal?.name ?? "積立"}」へ）`, c.toGoal)}
+        </tbody>
+        <tfoot><tr><td>＝ 予算に入れる繰越{c.manual ? `（計算なら ${signed(c.auto)}円）` : ""}</td><td className="num">{signed(c.auto)}</td></tr></tfoot>
+      </table>
+      <div className="note">前の月の終わりに残ったお金のうち、使い道が決まっていない分です。プラスなら上限 {yen(data.settings.carryCap)}円 まで予算に足し、こえた分は積立に回します。マイナスなら予算から引きます。</div>
+      {edit ? (
+        <div className="btns" style={{ alignItems: "center" }}>
+          <div style={{ width: 140 }}><NumInput value={val} onChange={setVal} autoFocus /></div>
+          <button className="btn sm" onClick={() => save(val === "" ? 0 : val)}>保存</button>
+          <button className="btn sm ghost" onClick={() => setEdit(false)}>やめる</button>
+        </div>
+      ) : (
+        <div className="btns">
+          <button className="btn sm ghost" onClick={() => { setEdit(true); setVal(c.budget); }}>この月だけ直す</button>
+          {c.manual && <button className="btn sm ghost" onClick={() => save(null)}>計算した額に戻す</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 繰越の決め方（始める月・上限・こえた分を回す積立） */
+function CarrySettings({ store, data }: { store: Store; data: AppData }) {
+  const [s, setS] = useState<S>(data.settings);
+  useEffect(() => setS(data.settings), [data.settings]);
+  const saves = data.goals.filter((g) => g.kind === "save" && g.active);
+  const save = async () => { if (await store.run(() => actions.saveSettings(s))) toast("保存しました"); };
+  return (
+    <section>
+      <h2>前月からの繰越の決め方</h2>
+      <div className="panel">
+        <div className="grid2">
+          <Field label="繰越を入れはじめる月" hint="空なら繰越を入れない"><input type="month" value={s.carryFrom ?? ""} onChange={(e) => setS({ ...s, carryFrom: e.target.value || null })} /></Field>
+          <Field label="予算に入れる上限" hint="こえた分は下の積立に回す"><NumInput value={s.carryCap} onChange={(v) => setS({ ...s, carryCap: v === "" ? 0 : v })} /></Field>
+        </div>
+        <Field label="上限をこえた分を回す積立" hint={saves.length ? "「なし」なら上限なしで全部予算に入れる" : "積立の目標がありません。「目標」で積立を足すと選べます"}>
+          <Select value={s.carryGoal ?? ""} options={["", ...saves.map((g) => g.id)]} labels={{ "": "なし（全部予算に入れる）", ...Object.fromEntries(saves.map((g) => [g.id, g.name])) }} onChange={(v) => setS({ ...s, carryGoal: v || null })} />
+        </Field>
+        <div className="btns"><button className="btn" onClick={save}>保存</button></div>
+      </div>
+    </section>
+  );
+}
+
 function Budgets({ store, data, month }: { store: Store; data: AppData; month: string }) {
   const today = todayJST();
   const st = data.settings;
@@ -107,7 +174,7 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   const sumOf = (cs: string[]) => cs.reduce((a, c) => a + (Number(vals[c]) || 0), 0);
   // 入力中の値で、予算と予備を出し直す（固定費を直すと、今月の予算も変わる）
   const fixedSum = sumOf(st.fixCats);
-  const free = v.base.salary + v.base.extra - fixedSum - v.base.goal;
+  const free = v.base.salary + v.base.extra + v.base.carry - fixedSum - v.base.goal;
   const reserve = free - sumOf(st.varCats);
   const own = data.budgets.some((b) => b.month === month && !b.category.startsWith("#") && b.category !== RESERVE);
   const save = async () => {
@@ -124,6 +191,7 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   return (
     <>
       <MonthBaseEditor store={store} data={data} month={month} />
+      <CarrySettings store={store} data={data} />
       <section>
         <h2>費目ごとの予算 <small>{own ? "この月の予算" : "前の月から引き継いでいます"}</small></h2>
         <div className="panel">
@@ -223,8 +291,8 @@ function GoalSheet({ store, data, g, onClose }: { store: Store; data: AppData; g
       <h2>臨時の{repay ? "返済" : "積立"} <small>賞与から一括など</small></h2>
       {(x.lumps ?? []).map((l, i) => (
         <div key={i} className="legend" style={{ justifyContent: "space-between" }}>
-          <span>{md(l.date)} {l.memo}</span>
-          <span><b className="num">{l.amount ? money(l.amount) : "残り全部"}</b> <button className="btn sm ghost" onClick={() => set({ lumps: (x.lumps ?? []).filter((_, j) => j !== i) })}>消す</button></span>
+          <span>{md(l.date)} {l.memo} {l.carry && <Chip>繰越から自動</Chip>}</span>
+          <span><b className="num">{l.amount ? money(l.amount) : "残り全部"}</b> {!l.carry && <button className="btn sm ghost" onClick={() => set({ lumps: (x.lumps ?? []).filter((_, j) => j !== i) })}>消す</button>}</span>
         </div>
       ))}
       <div className="grid2">
