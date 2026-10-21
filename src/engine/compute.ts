@@ -2,7 +2,7 @@ import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
 import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost, recurringDue } from "./schedule";
 import {
-  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, GOAL_KEY, isFixedCat, RESERVE,
+  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, BUDGET_KEY, GOAL_KEY, isFixedCat, RESERVE,
   type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
 } from "./types";
 
@@ -282,11 +282,16 @@ export function budgetsFor(d: Data, ym: string): Map<string, number> {
 export interface MonthBase {
   salary: number; // 給与
   extra: number; // 追加予算
+  carry: number; // 前月からの繰越（§5.8。マイナスもある）
+  carryInfo: Carry | null; // 繰越の内訳（繰越を入れない月は null）
   fixed: number; // 固定費（固定費の費目の予算の合計）
   goal: number; // 目標用マイナス
   goalAuto: number; // 目標マスタから出した目標用マイナス
   goalManual: boolean; // 予算マスタで手で直したか
-  T: number; // 今月の予算 ＝ 給与 ＋ 追加予算 − 固定費 − 目標用マイナス
+  available: number; // 使えるお金 ＝ 給与 ＋ 追加予算 ＋ 前月からの繰越 − 固定費 − 目標用マイナス
+  input: boolean; // 予算を使えるお金から自分で決める月か（carryFrom の月から）
+  budgetManual: boolean; // その月の予算を予算マスタ（#予算）で決めたか
+  T: number; // 今月の予算。自分で決める月は決めた額（なければ設定の budgetDefault）、それより前の月は使えるお金
 }
 
 /** その月の「予算の元」（§5.1） */
@@ -302,7 +307,88 @@ export function monthBase(d: Data, ym: string): MonthBase {
   const goalAuto = goalMinusAuto(d, ym);
   const hit = d.budgets.find((b) => b.month === ym && b.category === GOAL_KEY);
   const goal = hit ? hit.amount : goalAuto;
-  return { salary, extra, fixed, goal, goalAuto, goalManual: !!hit, T: salary + extra - fixed - goal };
+  const carryInfo = carryFor(d, ym);
+  const carry = carryInfo?.raw ?? 0;
+  const available = salary + extra + carry - fixed - goal;
+  const input = !!d.settings.carryFrom && ym >= d.settings.carryFrom;
+  const set = d.budgets.find((b) => b.month === ym && b.category === BUDGET_KEY);
+  const T = input ? (set ? set.amount : d.settings.budgetDefault) : available;
+  return { salary, extra, carry, carryInfo, fixed, goal, goalAuto, goalManual: !!hit, available, input, budgetManual: !!set, T };
+}
+
+// ---------- 前月からの繰越（§5.8） ----------
+
+/**
+ * 日 date の終わりの口座と財布（見込み）。date より前のいちばん新しい残高の記録に、そのあと date までの口座明細を足し引きする。
+ * 予定・まだ行のないクレカ支払いも入れる（先の月の終わりの見込みも出せるように）。
+ * date より前に記録がなければ、あとの記録から、そこまでの口座明細を戻して出す
+ */
+export function balanceAt(d: Data, date: string): { bank: number; wallet: number } | null {
+  const ym = ymOf(date);
+  const all = accountsWithBills(d, date, [addMonths(ym, -1), ym]);
+  const before = latestBalance(d.balances.filter((b) => b.date <= date));
+  const sum = (es: AccountEntry[], account: "bank" | "wallet") => es.filter((e) => e.account === account).reduce((a, e) => a + signedAmount(e), 0);
+  if (before) {
+    const es = all.filter((e) => e.date <= date && afterBase(e, before));
+    return { bank: (before.bank || 0) + sum(es, "bank"), wallet: (before.cash || 0) + sum(es, "wallet") };
+  }
+  const later = d.balances.filter((b) => b.date > date).sort((a, b) => a.date.localeCompare(b.date) || (a.at ?? "").localeCompare(b.at ?? ""))[0];
+  if (!later) return null;
+  // あとの記録までに引き落とされたクレカ支払いも戻す
+  const months = [addMonths(ym, -1), ym];
+  while (months[months.length - 1] < ymOf(later.date) && months.length < 6) months.push(addMonths(months[months.length - 1], 1));
+  const es = accountsWithBills(d, later.date, months).filter((e) => e.date > date && !afterBase(e, later));
+  return { bank: (later.bank || 0) - sum(es, "bank"), wallet: (later.cash || 0) - sum(es, "wallet") };
+}
+
+/**
+ * ym の月より前にクレカで使い（前の月までの予算でもう数えた）、ym の1日より後に口座から出る額。
+ * 分割（返済）は除く（引き落とす月の目標用マイナスで数えるため）。請求の確定の額が分かっていれば、それを使う
+ */
+export function cardOwedFrom(d: Data, ym: string): number {
+  const start = `${ym}-01`;
+  let sum = 0;
+  for (const pm of [ym, addMonths(ym, 1), addMonths(ym, 2)]) {
+    for (const b of billsFor(d, pm)) {
+      if (b.date < start) continue;
+      const items = b.items.filter((e) => e.group !== "installment");
+      const prior = items.filter((e) => ymOf(e.date) < ym);
+      if (!prior.length) continue;
+      const inst = b.items.filter((e) => e.group === "installment").reduce((a, e) => a + e.amount, 0);
+      sum += prior.length === items.length && b.row?.locked ? b.amount - inst : prior.reduce((a, e) => a + e.amount, 0);
+    }
+  }
+  return sum;
+}
+
+/** ym の月の終わりまでに、動いている積立の目標にたまった額（口座に置いたままのお金） */
+export function savedBy(d: Data, ym: string): number {
+  return d.goals.filter((g) => g.active && g.kind === "save").reduce((a, g) => a + (goalSchedule(g, d.settings, ym, 1)[0]?.left ?? g.balance), 0);
+}
+
+export interface Carry {
+  end: string; // 前の月の最後の日
+  bank: number; // その日の口座（見込み）
+  wallet: number; // その日の財布（見込み）
+  owed: number; // まだ口座から出ていない、前の月までのクレカ利用
+  saved: number; // 積立にたまった額
+  safety: number; // 安全残高
+  raw: number; // 繰越 ＝ 口座 ＋ 財布 − クレカ − 積立 − 安全残高
+}
+
+/**
+ * ym の月の、前月からの繰越（§5.8）。前の月の終わりに口座と財布に残るお金から、もう使い道が決まっているお金を引いた残り。
+ * 全部「使えるお金」に入れる（マイナスなら引く）。予算にしなかった分は口座に残り、次の月の繰越に入る
+ */
+export function carryFor(d: Data, ym: string): Carry | null {
+  const s = d.settings;
+  if (!s.carryFrom || ym < s.carryFrom) return null;
+  const prev = addMonths(ym, -1);
+  const end = dayOf(prev, 31);
+  const at = balanceAt(d, end);
+  if (!at) return null;
+  const owed = cardOwedFrom(d, ym), saved = savedBy(d, prev);
+  return { end, bank: at.bank, wallet: at.wallet, owed, saved, safety: s.safety, raw: at.bank + at.wallet - owed - saved - s.safety };
 }
 
 /** 予算に数える出費の1件（クレカ明細か口座明細） */

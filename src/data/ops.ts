@@ -33,7 +33,7 @@ const FIELDS: Record<OpsTable, string[]> = {
   account_entries: ["account", "direction", "status", "group", "category", "name", "memo", "date", "amount"],
   card_entries: ["card", "status", "date", "amount", "group", "category", "name", "shop", "memo", "tatekae"],
   balances: ["date", "bank", "cash", "memo"],
-  settings: ["safety", "payday", "salaryEstimate", "varCats", "fixCats", "dailyCats", "cards", "labels"],
+  settings: ["safety", "payday", "salaryEstimate", "varCats", "fixCats", "dailyCats", "cards", "labels", "carryFrom", "budgetDefault"],
 };
 const NAME: Record<OpsTable, string> = { budgets: "予算", goals: "目標", recurring: "定期", rules: "ルール", account_entries: "口座明細", card_entries: "クレカ明細", balances: "残高", settings: "設定" };
 

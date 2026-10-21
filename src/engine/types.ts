@@ -145,11 +145,15 @@ export interface Settings {
   version: number; // データの形の版（src/data/store.ts で古い版を直す）
   v2CopiedAt?: string; // 前の版の表（entries・card_bills）から、この時刻までに入った行を写した
   labels?: Record<string, string>; // 大費目の名前を変えたもの（キーは大費目の id）
+  carryFrom: string | null; // 前月からの繰越を入れ、予算を「使えるお金」から自分で決めはじめる月（YYYY-MM）。null ならしない（§5.1・§5.8）
+  budgetDefault: number; // その月の予算を決めていないときの予算
 }
 
 export const RESERVE = "予備";
 /** 予算マスタで、その月の目標用マイナスを手で直した値を入れる費目 */
 export const GOAL_KEY = "#目標用マイナス";
+/** 予算マスタで、その月の予算（使えるお金のうち予算にする額）を入れる費目 */
+export const BUDGET_KEY = "#予算";
 
 export const DEFAULT_SETTINGS: Settings = {
   safety: 0,
@@ -162,7 +166,9 @@ export const DEFAULT_SETTINGS: Settings = {
   varCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽", "美容", "医療", "衣服"],
   fixCats: ["家賃", "奨学金", "保険・共済", "通信", "水道ガス光熱費", "定期代", "サブスク"],
   dailyCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽"],
-  version: 6,
+  version: 7,
+  carryFrom: null,
+  budgetDefault: 90000,
 };
 
 /** 予算を持つ費目。変動費（予備を含む）と固定費 */
