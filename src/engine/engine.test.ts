@@ -228,6 +228,11 @@ describe("今月の予算（給与 ＋ 追加予算 − 固定費 − 目標用�
     expect(budgetsFor(d, "2026-10").has("家賃")).toBe(false);
     expect(monthBase(d, "2027-01").fixed).toBe(100000);
   });
+  it("固定費の費目が定期のお金になければ、その月の明細と予定の合計を初めの値にする", () => {
+    const d = D({ entries: [E({ status: "plan", method: "bank", amount: 70000, date: "2026-11-04", category: "家賃", item: "家賃" })] });
+    expect(budgetsFor(d, "2026-11").get("家賃")).toBe(70000);
+    expect(budgetsFor(d, "2026-12").has("家賃")).toBe(false);
+  });
   it("定期のお金から作った収入は、扱いを決めていなければ給与として数える", () => {
     const d = D({ entries: [E({ kind: "income", status: "plan", method: "bank", amount: 250000, date: "2026-11-16", category: null, recurring_id: "r1" })] });
     expect(monthBase(d, "2026-11").salary).toBe(250000);
