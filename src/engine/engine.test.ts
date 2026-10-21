@@ -383,14 +383,14 @@ describe("前月からの繰越（§5.8）と、使えるお金から決める�
     ],
     ...p,
   });
-  it("繰越 ＝ 口座＋財布 − 前の月までのクレカ − 積立 − 安全残高", () => {
+  it("繰越 ＝ 口座 − 前の月までのクレカ − 積立 − 安全残高（財布は数えない）", () => {
     const c = carryFor(base(), "2026-11")!;
-    expect([c.bank, c.wallet, c.owed, c.saved, c.raw]).toEqual([250000, 10000, 71000, 70000, 109000]);
+    expect([c.bank, c.owed, c.saved, c.raw]).toEqual([250000, 71000, 70000, 99000]);
     expect(carryFor(base(), "2026-10")).toBeNull();
   });
   it("使えるお金 ＝ 給与 ＋ 追加予算 ＋ 繰越 − 固定費 − 目標用マイナス。予算は決めた額、なければ初めの値", () => {
     const b = monthBase(base(), "2026-11");
-    expect([b.carry, b.goal, b.available, b.input, b.budgetManual, b.T]).toEqual([109000, 20000, 200000 + 109000 - b.fixed - 20000, true, false, 90000]);
+    expect([b.carry, b.goal, b.available, b.input, b.budgetManual, b.T]).toEqual([99000, 20000, 200000 + 99000 - b.fixed - 20000, true, false, 90000]);
     const set = monthBase(base({ budgets: [{ month: "2026-11", category: BUDGET_KEY, amount: 120000 }] }), "2026-11");
     expect([set.budgetManual, set.T]).toEqual([true, 120000]);
     // 始める月より前は、使えるお金がそのまま予算
@@ -399,7 +399,7 @@ describe("前月からの繰越（§5.8）と、使えるお金から決める�
   });
   it("マイナスの繰越は使えるお金から引く", () => {
     const c = carryFor(base({ settings: { ...s, safety: 300000 } }), "2026-11")!;
-    expect(c.raw).toBe(-181000);
+    expect(c.raw).toBe(-191000);
   });
   it("前の月より前に残高の記録がなければ、あとの記録から戻して出す", () => {
     const later = base({ balances: [bal({ date: "2026-11-05", bank: 240000, cash: 10000 })], accounts: [A({ date: "2026-11-03", amount: 10000 })] });

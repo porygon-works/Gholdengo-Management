@@ -111,7 +111,6 @@ function CarryLine({ data, month }: { data: AppData; month: string }) {
       <table className="tbl">
         <tbody>
           {row(`${md(c.end)}の口座（見込み）`, c.bank)}
-          {c.wallet !== 0 && row("＋ 財布", c.wallet)}
           {row("− まだ引き落とされていないクレカ（前の月までに使った分）", c.owed)}
           {c.saved !== 0 && row("− 積立にたまった額（口座に置いたまま）", c.saved)}
           {c.safety !== 0 && row("− 安全残高", c.safety)}
