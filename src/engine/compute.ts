@@ -1,7 +1,7 @@
 import { addDays, addMonths, daysBetween, lastDay, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardPayDate, cashDate, ownCost } from "./schedule";
-import { BASE_KEYS, budgetCats, INCOME_EXTRA, INCOME_SALARY, isFixedCat, nonBudgetCats, REPAY, RESERVE, type Balance, type BaseField, type BaseKey, type Data, type Entry, type Settings } from "./types";
+import { cardOf, cardPayDate, cashDate, closingMonth, ownCost } from "./schedule";
+import { BASE_KEYS, budgetCats, INCOME_EXTRA, INCOME_SALARY, isFixedCat, nonBudgetCats, REPAY, RESERVE, type Balance, type BaseField, type BaseKey, type CardDef, type Data, type Entry, type Settings } from "./types";
 
 // 仕様書 §5 の計算式
 
@@ -60,9 +60,9 @@ export function projection(d: Data, today: string): Projection | null {
     let cardSum = 0;
     for (let i = events.length - 1; i >= 0; i--) {
       const ev = events[i];
-      if (ev.date === b.pay_date && ev.entry?.method === "card" && ev.entry.kind === "expense") { cardSum -= ev.delta; events.splice(i, 1); }
+      if (ev.date === b.pay_date && ev.entry?.method === "card" && ev.entry.kind === "expense" && cardOf(s, ev.entry.card).id === cardOf(s, b.card).id) { cardSum -= ev.delta; events.splice(i, 1); }
     }
-    events.push({ date: b.pay_date, delta: -b.amount, label: "クレカ引落（請求額）", bill: true, cardSum });
+    events.push({ date: b.pay_date, delta: -b.amount, label: `${cardOf(s, b.card).name}の引落（請求額）`, bill: true, cardSum });
   }
   const isCard = (e: AssetEvent) => (e.entry?.method === "card" ? 1 : 0);
   events.sort((a, b) => a.date.localeCompare(b.date) || Math.sign(b.delta) - Math.sign(a.delta) || isCard(a) - isCard(b));
@@ -429,4 +429,53 @@ export function monthlyFor(d: Data, p: Omit<PlanInput, "monthly">, by: string, m
   let lo = 0, hi = max;
   while (hi - lo > 1000) { const mid = Math.floor((lo + hi) / 2000) * 1000; if (ok(mid)) hi = mid; else lo = mid; }
   return ok(lo) ? lo : hi;
+}
+
+export interface CardDebit {
+  card: CardDef;
+  date: string; // 引落日
+  closingYm: string; // どの締め月の分か
+  items: Entry[]; // その締め月にこのカードで使ったもの（返済を除く）
+  repays: Entry[]; // この引落日に一緒に引き落とされるリボ・分割の返済
+  estimate: number; // 見込み ＝ 使ったもの ＋ 返済
+  bill: number | null; // 確定した請求額（カードのメール・手入力）
+  amount: number; // 確定していれば請求額、なければ見込み
+}
+
+export interface Debits {
+  direct: Entry[]; // 口座から直接引き落とされるもの（奨学金・共済など）
+  directSum: number;
+  cards: CardDebit[];
+  total: number;
+}
+
+/**
+ * その月に口座から出ていく引き落とし（§5.7）。
+ * - 口座から直接：金種が「口座」の支出（予定を含む）
+ * - カード：引落日がその月になる締め月の、カードごとの利用と返済。請求額が分かっていればそれを使う
+ */
+export function debitsFor(d: Data, ym: string): Debits {
+  const s = d.settings;
+  const live = d.entries.filter((e) => isLive(e) && e.kind === "expense");
+  const direct = live.filter((e) => e.method === "bank" && ymOf(e.date) === ym).sort((a, b) => a.date.localeCompare(b.date));
+  const cards = s.cards.map((c): CardDebit => {
+    const closingYm = addMonths(ym, -c.payMonths);
+    const date = cardPayDate(closingYm, s, c.id);
+    const mine = live.filter((e) => e.method === "card" && cardOf(s, e.card).id === c.id);
+    const items = mine.filter((e) => e.category !== REPAY && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
+    const repays = mine.filter((e) => e.category === REPAY && ymOf(e.date) === ym);
+    const estimate = [...items, ...repays].reduce((a, e) => a + e.amount, 0);
+    const hit = d.cardBills.find((b) => cardOf(s, b.card).id === c.id && b.pay_date === date);
+    const bill = hit ? hit.amount : null;
+    return { card: c, date, closingYm, items, repays, estimate, bill, amount: bill ?? estimate };
+  });
+  const directSum = direct.reduce((a, e) => a + e.amount, 0);
+  return { direct, directSum, cards, total: directSum + cards.reduce((a, c) => a + c.amount, 0) };
+}
+
+/** 来月の支払い予定（§5.8）：固定費の見込み ＋ 変動費（来月の予算）＋ リボ・分割の返済 */
+export function nextMonthSpend(d: Data, ym: string): { ym: string; fixed: number; variable: number; repay: number; total: number } {
+  const b = monthBase(d, ym);
+  const variable = Math.max(0, b.T);
+  return { ym, fixed: b.fixed, variable, repay: b.repay, total: b.fixed + variable + b.repay };
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { budgetCats, computeMonth, goalPlan, INCOME_EXTRA, INCOME_SALARY, isLive, monthBase, OUTSIDE, REPAY, RESERVE, todayJST, type BaseField, type Debt, type Method, type Recurring, type Settings as S } from "../engine";
+import { budgetCats, computeMonth, goalPlan, INCOME_EXTRA, INCOME_SALARY, isLive, monthBase, OUTSIDE, REPAY, RESERVE, todayJST, type BaseField, type CardDef, type Debt, type Method, type Recurring, type Settings as S } from "../engine";
 import { actions, type AppData, type ImportFile, type Store } from "../data/store";
 import { backend, resetLocal } from "../data/backend";
 import { VERSION_LABEL } from "./version";
-import { ALL_METHODS, Chip, Field, md, METHOD_LABEL, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
+import { ALL_METHODS, Chip, fromPayKey, payKey, payKeys, payLabels, Field, md, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
 
 type Tab = "budget" | "income" | "recurring" | "rules" | "debts" | "assets" | "data";
 const TABS: [Tab, string][] = [["budget", "予算"], ["income", "給与・賞与"], ["recurring", "定期のお金"], ["rules", "お店のルール"], ["debts", "借金"], ["assets", "費目と口座"], ["data", "データ"]];
@@ -196,7 +196,7 @@ function Income({ store, data }: { store: Store; data: AppData }) {
       <section>
         <h2>毎月の収入（給与の見込み） <button className="btn ghost sm" onClick={() => setEdit({ name: "給与", kind: "income", category: INCOME_SALARY, amount: data.settings.salaryEstimate, day: data.settings.payday, shift: "next", method: "bank", active: true })}>＋ 追加</button></h2>
         <div className="panel">
-          {incomeRec.length ? <div className="list">{incomeRec.map((r) => <RecRow key={r.id} r={r} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません。「追加」から給与を入れると、毎月の入金の予定が自動でできます。</div>}
+          {incomeRec.length ? <div className="list">{incomeRec.map((r) => <RecRow key={r.id} r={r} s={data.settings} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません。「追加」から給与を入れると、毎月の入金の予定が自動でできます。</div>}
           <div className="note">見込みの金額で予定を作ります。実際の入金があったら「予定」の画面で確定にしてください。</div>
         </div>
       </section>
@@ -224,10 +224,10 @@ function Income({ store, data }: { store: Store; data: AppData }) {
 
 const SHIFT_LABEL = { next: "後の平日", prev: "前の平日", none: "ずらさない" } as const;
 
-function RecRow({ r, onOpen }: { r: Recurring; onOpen: () => void }) {
+function RecRow({ r, s, onOpen }: { r: Recurring; s: S; onOpen: () => void }) {
   return (
     <button className="row" onClick={onOpen} style={{ gridTemplateColumns: "1fr auto" }}>
-      <span className="t"><div>{r.name} {!r.active && <span className="chip">止めている</span>}</div><div>毎月{r.day}日（土日祝は{SHIFT_LABEL[r.shift]}）・{METHOD_LABEL[r.method]}{r.category ? `・${r.category}` : ""}{r.end_month ? `・${ymLabel(r.end_month)}まで` : ""}</div></span>
+      <span className="t"><div>{r.name} {!r.active && <span className="chip">止めている</span>}</div><div>毎月{r.day}日（土日祝は{SHIFT_LABEL[r.shift]}）・{payLabels(s)[payKey(s, r.method, r.card)]}{r.category ? `・${r.category}` : ""}{r.end_month ? `・${ymLabel(r.end_month)}まで` : ""}</div></span>
       <span className="a num">{r.kind === "income" ? "＋" : ""}{yen(r.amount)}</span>
     </button>
   );
@@ -246,11 +246,11 @@ function RecurringList({ store, data }: { store: Store; data: AppData }) {
       </section>
       <section>
         <h2>固定費 <small>家賃・奨学金・通信・サブスクなど 計 {yen(fixed.reduce((a, r) => a + (r.active ? r.amount : 0), 0))}円</small></h2>
-        <div className="panel">{fixed.length ? <div className="list">{fixed.map((r) => <RecRow key={r.id} r={r} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません</div>}</div>
+        <div className="panel">{fixed.length ? <div className="list">{fixed.map((r) => <RecRow key={r.id} r={r} s={data.settings} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません</div>}</div>
       </section>
       <section>
         <h2>そのほか <small>返済・変動費など 計 {yen(others.reduce((a, r) => a + (r.active ? r.amount : 0), 0))}円</small></h2>
-        <div className="panel">{others.length ? <div className="list">{others.map((r) => <RecRow key={r.id} r={r} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません</div>}</div>
+        <div className="panel">{others.length ? <div className="list">{others.map((r) => <RecRow key={r.id} r={r} s={data.settings} onOpen={() => setEdit(r)} />)}</div> : <div className="note">まだありません</div>}</div>
       </section>
       {edit && <RecurringSheet store={store} data={data} r={edit} onClose={() => setEdit(null)} />}
     </>
@@ -281,7 +281,7 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
       </div>
       <div className="grid2">
         <Field label="土日祝のとき"><Select value={x.shift ?? "next"} options={["next", "prev", "none"] as const} labels={SHIFT_LABEL} onChange={(v) => set({ shift: v })} /></Field>
-        <Field label="金種"><Select value={(x.method ?? "bank") as Method} options={ALL_METHODS} labels={METHOD_LABEL} onChange={(v) => set({ method: v })} /></Field>
+        <Field label="金種"><Select value={payKey(data.settings, (x.method ?? "bank") as Method, x.card ?? null)} options={payKeys(data.settings, ALL_METHODS)} labels={payLabels(data.settings)} onChange={(v) => set(fromPayKey(v))} /></Field>
       </div>
       {x.kind === "income" && <Field label="予算の扱い"><Select value={x.category ?? ""} options={[INCOME_SALARY, INCOME_EXTRA, ""]} labels={{ [INCOME_SALARY]: "給与（予算の元）", [INCOME_EXTRA]: "追加予算", "": "予算に入れない" }} onChange={(v) => set({ category: v || null })} /></Field>}
       {x.kind === "expense" && <Field label="費目" hint="リボの返済は「返済」（目標用マイナスの中で払う）"><Select value={x.category ?? ""} options={cats} labels={{ "": "未分類" }} onChange={(v) => set({ category: v || null })} /></Field>}
@@ -396,10 +396,17 @@ function Assets({ store, data }: { store: Store; data: AppData }) {
           <Field label="給料日">{n("payday")}</Field>
           <Field label="給与の見込み額">{n("salaryEstimate")}</Field>
         </div>
-        <div className="grid2">
-          <Field label="カードの締め日（31＝月末）">{n("cardClosingDay")}</Field>
-          <Field label="カードの引落日">{n("cardPayDay")}</Field>
-        </div>
+        {s.cards.map((c, i) => {
+          const setC = (p: Partial<CardDef>) => setS({ ...s, cards: s.cards.map((x, j) => (j === i ? { ...x, ...p } : x)) });
+          return (
+            <div key={c.id} className="grid2">
+              <Field label={i === 0 ? "カードの名前（いつも使うカード・メールから入る）" : "カードの名前"}><input value={c.name} onChange={(e) => setC({ name: e.target.value })} /></Field>
+              <Field label="締め日（31＝月末）"><NumInput value={c.closingDay} onChange={(v) => setC({ closingDay: v === "" ? 31 : v })} /></Field>
+              <Field label="引落日"><NumInput value={c.payDay} onChange={(v) => setC({ payDay: v === "" ? 1 : v })} /></Field>
+              <Field label="引き落とす月"><Select value={String(c.payMonths)} options={["1", "2"]} labels={{ "1": "締めた翌月", "2": "締めた翌々月" }} onChange={(v) => setC({ payMonths: +v })} /></Field>
+            </div>
+          );
+        })}
         <Field label="1日に使える額を出す費目" hint="「、」で区切る"><input value={s.dailyCats.join("、")} onChange={(e) => setS({ ...s, dailyCats: e.target.value.split(/[、,]/).map((x) => x.trim()).filter(Boolean) })} /></Field>
         <Field label="変動費の費目" hint="「、」で区切る"><input value={s.varCats.join("、")} onChange={(e) => setS({ ...s, varCats: e.target.value.split(/[、,]/).map((x) => x.trim()).filter(Boolean) })} /></Field>
         <Field label="固定費の費目" hint="「、」で区切る"><input value={s.fixCats.join("、")} onChange={(e) => setS({ ...s, fixCats: e.target.value.split(/[、,]/).map((x) => x.trim()).filter(Boolean) })} /></Field>

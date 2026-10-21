@@ -23,6 +23,7 @@ export interface Entry {
   recurring_id: string | null;
   not_dup: string[]; // 「別のもの」と決めた相手
   locked: boolean; // 本人が費目などを直した。吸収されても本人の値を残す
+  card: string | null; // クレカで払ったときのカード（settings.cards の id）。null は1枚目のカード
 }
 
 export interface Balance {
@@ -36,8 +37,18 @@ export interface Balance {
 
 export interface CardBill {
   id: string;
+  card: string; // settings.cards の id
   pay_date: string;
-  amount: number;
+  amount: number; // 請求額（確定）
+}
+
+/** クレカ1枚の締め日と引落日 */
+export interface CardDef {
+  id: string;
+  name: string;
+  closingDay: number; // 31 = 月末
+  payDay: number;
+  payMonths: number; // 締めた月の何か月後に引き落とすか（翌月なら1）
 }
 
 export interface Recurring {
@@ -49,6 +60,7 @@ export interface Recurring {
   day: number; // 1〜31。月末より大きければ月末
   shift: "next" | "prev" | "none"; // 土日祝のずらし方
   method: Method;
+  card: string | null; // クレカのとき、どのカードか。null は1枚目
   shop: string; // お店の名前のヒント。カードの明細のお店にこれが入っていれば、費目が違ってもこの予定とまとめる
   start_month: string | null; // YYYY-MM
   end_month: string | null;
@@ -82,8 +94,7 @@ export interface Settings {
   safety: number; // 安全残高
   reserveGoal: number; // 目標残高（給料日前日）
   payday: number; // 給料日
-  cardClosingDay: number; // 31 = 月末
-  cardPayDay: number;
+  cards: CardDef[]; // クレカ。1枚目がいつも使うカード（カードのメールから入る明細もこれ）
   salaryEstimate: number;
   varCats: string[]; // 変動費
   fixCats: string[]; // 固定費
@@ -112,15 +123,17 @@ export const DEFAULT_SETTINGS: Settings = {
   safety: 0,
   reserveGoal: 0,
   payday: 15,
-  cardClosingDay: 31,
-  cardPayDay: 26,
+  cards: [
+    { id: "smbc", name: "三井", closingDay: 31, payDay: 26, payMonths: 1 },
+    { id: "saison", name: "セゾン", closingDay: 31, payDay: 4, payMonths: 1 },
+  ],
   salaryEstimate: 0,
   varCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽", "美容", "医療", "衣服"],
   fixCats: ["家賃", "奨学金", "保険・共済", "通信", "水道ガス光熱費", "定期代", "サブスク"],
   dailyCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽"],
   savingMonthly: 0,
   savingStart: null,
-  version: 2,
+  version: 3,
 };
 
 /**
