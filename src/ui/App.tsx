@@ -6,23 +6,26 @@ import { useStore } from "../data/store";
 import { Toaster, ymLabel } from "./common";
 import { Dashboard } from "./Dashboard";
 import { AccountSheet, CardSheet, NewSheet, type Open } from "./Sheets";
-import { BalanceSheet, GoalsView, Passbook } from "./Goals";
+import { BalanceSheet } from "./Balance";
+import { FlowView, openRowOf } from "./Flow";
 import { Ledger } from "./Ledger";
 import { Login } from "./Login";
-import { Plans } from "./Plans";
-import { Planner } from "./Planner";
+import { PlansView } from "./PlansView";
 import { VERSION_LABEL } from "./version";
 import { reviewCount, ReviewView } from "./Review";
 import { SettingsView } from "./Settings";
 
-type Screen = "home" | "ledger" | "plans" | "settings" | "review" | "goals" | "passbook" | "planner";
-const TITLES: Record<Screen, string> = { home: "ダッシュボード", ledger: "明細", plans: "予定", settings: "設定", review: "要確認", goals: "目標の見通し", passbook: "口座の見通し", planner: "計画をつくる" };
-const WITH_MONTH: Screen[] = ["home", "ledger", "plans", "settings"];
+type Screen = "home" | "ledger" | "flow" | "plans" | "settings" | "review";
+const TITLES: Record<Screen, string> = { home: "ダッシュボード", ledger: "取引明細", flow: "口座の見通し", plans: "計画", settings: "設定", review: "要確認" };
+const TAB_LABEL: Record<string, string> = { home: "ホーム", ledger: "明細", flow: "見通し", plans: "計画", settings: "設定" };
+const SCREENS: Screen[] = ["home", "ledger", "flow", "plans", "settings", "review"];
+const WITH_MONTH: Screen[] = ["home", "ledger", "settings"];
 
 const ICONS = {
   home: <path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
   ledger: <path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" />,
-  plans: <><rect x="4" y="5" width="16" height="15" rx="1" /><path d="M4 10h16M9 3v4M15 3v4" /></>,
+  flow: <path d="M3 19h18M4 15l5-5 4 3 7-7" />,
+  plans: <><path d="M4 6h16M4 12h10M4 18h6" /><circle cx="18" cy="16" r="3" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></>,
 };
 
@@ -45,7 +48,8 @@ function Main() {
   const store = useStore();
   const { data, error, loading } = store;
   const today = todayJST();
-  const [screen, setScreen] = useState<Screen>(() => { try { return (localStorage.getItem("gholdengo.screen") as Screen) || "home"; } catch { return "home"; } });
+  const [screen, setScreen] = useState<Screen>(() => { try { const v = localStorage.getItem("gholdengo.screen") as Screen; return SCREENS.includes(v) ? v : "home"; } catch { return "home"; } });
+  const [planId, setPlanId] = useState<string | null>(null);
   const [month, setMonth] = useState(ymOf(today));
   const [menu, setMenu] = useState(false);
   const [sheet, setSheet] = useState<SheetState>(null);
@@ -55,6 +59,8 @@ function Main() {
   const go = (s: Screen) => { setScreen(s); setMenu(false); window.scrollTo(0, 0); };
   const reviews = data ? reviewCount(data, today) : 0;
   const openEntry = (o: Open) => setSheet(o);
+  const openPlan = (id: string) => { setPlanId(id); go("plans"); };
+  const openRow = openRowOf(openEntry, openPlan);
 
   const sub = loading && !data ? "読み込み中…" : error ? "保存か読み込みに失敗しました" : backend.mode === "local" ? "お試しモード（この端末だけに保存）" : `今日 ${+today.slice(5, 7)}/${+today.slice(8)}`;
 
@@ -84,22 +90,20 @@ function Main() {
               if (to === "balance") setSheet({ type: "balance" });
               else if (to === "ledger") { setFocusCat(cat ?? null); go("ledger"); }
               else go(to);
-            }} open={(entry) => setSheet({ type: "account", entry })} onOpen={openEntry} />}
-            {screen === "ledger" && <Ledger data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "new" })} />}
-            {screen === "plans" && <Plans data={data} month={month} today={today} onOpen={openEntry} onAdd={() => setSheet({ type: "new", plan: true })} />}
+            }} openRow={openRow} openPlan={openPlan} />}
+            {screen === "ledger" && <Ledger data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "new" })} onAddPlan={() => setSheet({ type: "new", plan: true })} />}
+            {screen === "flow" && <FlowView data={data} today={today} openRow={openRow} />}
+            {screen === "plans" && <PlansView store={store} data={data} today={today} openId={planId} setOpenId={setPlanId} />}
             {screen === "settings" && <SettingsView store={store} data={data} month={month} onOpen={openEntry} />}
             {screen === "review" && <ReviewView store={store} data={data} today={today} onOpen={openEntry} />}
-            {screen === "goals" && <GoalsView data={data} today={today} />}
-            {screen === "passbook" && <Passbook data={data} today={today} onOpen={openEntry} />}
-            {screen === "planner" && <Planner store={store} data={data} today={today} />}
           </main>
         )}
       </div>
 
       <nav className="tabs" role="tablist">
-        {(["home", "ledger", "plans", "settings"] as const).map((t) => (
-          <button key={t} role="tab" aria-selected={screen === t} onClick={() => { if (t === "ledger") setFocusCat(null); go(t); }}>
-            <svg viewBox="0 0 24 24">{ICONS[t]}</svg>{TITLES[t]}
+        {(["home", "ledger", "flow", "plans", "settings"] as const).map((t) => (
+          <button key={t} role="tab" aria-selected={screen === t} onClick={() => { if (t === "ledger") setFocusCat(null); if (t === "plans") setPlanId(null); go(t); }}>
+            <svg viewBox="0 0 24 24">{ICONS[t]}</svg>{TAB_LABEL[t]}
           </button>
         ))}
       </nav>
@@ -111,9 +115,8 @@ function Main() {
             <h3>メニュー</h3>
             <button onClick={() => { setMenu(false); setSheet({ type: "balance" }); }}>口座と財布（残高を直す・ATM）</button>
             <button onClick={() => go("review")}>要確認 <span className="num">{reviews || ""}</span></button>
-            <button onClick={() => go("passbook")}>口座の見通し（通帳）</button>
-            <button onClick={() => go("planner")}>計画をつくる（リボ返済・貯金）</button>
-            <button onClick={() => go("goals")}>目標</button>
+            <button onClick={() => go("flow")}>口座の見通し</button>
+            <button onClick={() => go("plans")}>計画</button>
             <button onClick={() => go("settings")}>設定</button>
             <button onClick={() => { setMenu(false); store.refresh(); }}>読み直す</button>
             {supabase && <button onClick={() => supabase!.auth.signOut()}>ログアウト</button>}

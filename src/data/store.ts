@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, applyLabels, syncGoalPlans, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
-  type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type Goal, type Recurring, type Rule, type Settings,
+  addMonths, applyLabels, budgetFundDate, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, goalPayDate, goalSchedule, groupOfCat, missingRecurring, normalizeBills, RESERVE, ruleFor, syncBills, syncLumps, todayJST, ymOf,
+  type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type FundSource, type Goal, type MonthSetting, type Plan, type PlanDebt, type PlanFund, type PlanKind, type Recurring, type Rule, type Settings, type Status,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
 import { SEED_RULES } from "./seed";
@@ -9,7 +9,7 @@ import { snapshot } from "./snapshot";
 import { convertBill, convertDebt, convertEntry, recurringFromRow } from "./v2";
 
 export interface ReviewRow { id: string; kind: string; title: string; body: string; resolved: boolean; created_at: string }
-export interface AppData extends Data { review: ReviewRow[] }
+export interface AppData extends Data { review: ReviewRow[]; missing: string[] }
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Math.round(Number(v)) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -34,6 +34,7 @@ function toData(raw: Raw): AppData {
     group: (r.group as AccountEntry["group"]) || "other", category: opt(r.category), name: str(r.name), memo: str(r.memo), date: day(r.date), amount: num(r.amount),
     source: (r.source as AccountEntry["source"]) || "manual", source_ref: opt(r.source_ref), recurring_id: opt(r.recurring_id), goal_id: opt(r.goal_id),
     card: opt(r.card), pair_id: opt(r.pair_id), locked: !!r.locked, at: str(r.created_at) || undefined,
+    plan_id: opt(r.plan_id), debt_id: opt(r.debt_id), plan_role: r.plan_role === "pay" || r.plan_role === "lump" ? r.plan_role : null, budget_month: opt(r.budget_month),
   }));
   const cards: CardEntry[] = raw.card_entries.filter((r) => !r.deleted).map((r) => ({
     id: str(r.id), card: str(r.card) || settings.cards[0].id, status: r.status === "plan" ? "plan" : "confirmed", date: day(r.date), amount: num(r.amount),
@@ -48,13 +49,21 @@ function toData(raw: Raw): AppData {
     target: num(r.target), monthly: num(r.monthly), day: num(r.day) || 27, start_month: opt(r.start_month), end_month: opt(r.end_month),
     lumps: Array.isArray(r.lumps) ? (r.lumps as Goal["lumps"]).map((l) => ({ date: day(l.date), amount: num(l.amount), memo: str(l.memo) })) : [], active: r.active !== false, sort: num(r.sort),
   }));
+  const plans: Plan[] = [...(raw.plans ?? [])].sort((a, b) => num(a.sort) - num(b.sort) || str(a.created_at).localeCompare(str(b.created_at))).map((r) => ({
+    id: str(r.id), kind: (r.kind === "buy" || r.kind === "save" ? r.kind : "repay") as PlanKind, name: str(r.name), use_date: r.use_date ? day(r.use_date) : null, target: num(r.target), done: !!r.done, sort: num(r.sort),
+  }));
+  const debts: PlanDebt[] = (raw.plan_debts ?? []).map((r) => ({ id: str(r.id), plan_id: str(r.plan_id), name: str(r.name), balance: num(r.balance), as_of: day(r.as_of) || day(r.created_at), sort: num(r.sort) }));
+  const funds: PlanFund[] = (raw.plan_funds ?? []).map((r) => ({
+    id: str(r.id), plan_id: str(r.plan_id), source: (r.source === "bonus" || r.source === "spare" ? r.source : "budget") as FundSource, name: str(r.name), date: day(r.date), budget_month: opt(r.budget_month), amount: num(r.amount), status: r.status === "confirmed" ? "confirmed" : "plan",
+  }));
+  const months: MonthSetting[] = (raw.months ?? []).map((r) => ({ month: str(r.month), budget: r.budget == null || r.budget === "" ? null : num(r.budget), memo: str(r.memo) }));
   const budgets: Budget[] = raw.budgets.map((r) => ({ month: str(r.month), category: str(r.category), amount: num(r.amount) }));
   const rules: Rule[] = raw.rules.map((r) => ({ id: str(r.id), pattern: str(r.pattern), category: str(r.category) }));
   const review: ReviewRow[] = raw.review.map((r) => ({ id: str(r.id), kind: str(r.kind), title: str(r.title), body: str(r.body), resolved: !!r.resolved, created_at: str(r.created_at) }));
-  return { accounts, cards, balances, recurring, goals, budgets, rules, settings, review, removedRefs };
+  return { accounts: normalizeBills(accounts), cards, balances, recurring, goals, plans, debts, funds, months, budgets, rules, settings, review, removedRefs, missing: raw.missing ?? [] };
 }
 
-const CACHE = "gholdengo.cache.v3";
+const CACHE = "gholdengo.cache.v4";
 
 /**
  * Claude が読むための書き出しを Supabase に保存する（GAS が1時間に1回 Google ドライブに置く）。
@@ -159,21 +168,76 @@ async function migrate6(raw: Raw, d: AppData): Promise<boolean> {
   return true;
 }
 
+/**
+ * v4：前の版の目標マスタを計画に写す（1回だけ。docs/SPEC.md §3.4）。
+ * - 返済の目標は、臨時の返済の日が同じものを1つの計画にまとめる（まとめて返す日 ＝ その日）。残高は今日の見込みにする
+ * - 毎月の返済は、計画の支払い（口座明細の予定）にする。カードの支払いはカードの引落日に、カードの請求と一緒に出る
+ * - 積立の目標は貯蓄の計画にして、毎月の額は「予算から」確保額に入れる分にする
+ * - 目標から作った予定（まだ予定のもの）は消し、目標は止める
+ */
+async function migratePlans(raw: Raw, d: AppData, today: string): Promise<boolean> {
+  // 写した目標は止めるので、動いている目標があるときだけ写す（前の版の取り込みで目標が入ったときも）
+  const active = d.goals.filter((g) => g.active);
+  if (raw.missing?.length || !active.length) return false;
+  const s = d.settings, cur = ymOf(today);
+  const accounts: Row[] = [], debts: Row[] = [], funds: Row[] = [], plans: Row[] = [];
+  const groups = new Map<string, Goal[]>();
+  for (const g of active.filter((g) => g.kind === "repay")) {
+    const use = g.lumps.map((l) => l.date).filter((x) => x >= today).sort()[0];
+    const k = use ?? `none:${g.id}`;
+    groups.set(k, [...(groups.get(k) ?? []), g]);
+  }
+  let sort = 0;
+  for (const [k, gs] of groups) {
+    const planId = newId(), use = k.startsWith("none:") ? null : k;
+    plans.push({ id: planId, kind: "repay", name: gs.length > 1 ? "リボを全額返す" : `${gs[0].name}を返す`, use_date: use, target: 0, done: false, sort: sort++ });
+    gs.forEach((g, i) => {
+      const debtId = newId();
+      // 残高は今日の見込み（入れた日のあと、今日までに来た毎月の返済を引く）
+      let left = g.balance;
+      for (const m of goalSchedule(g, s, g.as_of ? ymOf(g.as_of) : cur, 24)) { const pd = goalPayDate(g, m.ym, s); if (pd > today) break; if (!g.as_of || pd > g.as_of) left -= m.pay; }
+      debts.push({ id: debtId, plan_id: planId, name: g.name, balance: Math.max(0, left), as_of: today, sort: i });
+      for (const m of goalSchedule(g, s, cur, 6)) {
+        const date = goalPayDate(g, m.ym, s);
+        if (!m.pay || date <= today || (use && date >= use)) continue;
+        accounts.push({ id: newId(), account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}の支払い`, memo: "", date, amount: m.pay, source: "plan", source_ref: `plan:${planId}:${g.id}:${m.ym}`, recurring_id: null, goal_id: null, card: g.card, pair_id: null, locked: false, plan_id: planId, debt_id: debtId, plan_role: "pay", budget_month: m.ym });
+      }
+    });
+  }
+  for (const g of active.filter((g) => g.kind === "save")) {
+    const planId = newId();
+    plans.push({ id: planId, kind: "save", name: g.name, use_date: null, target: g.target, done: false, sort: sort++ });
+    if (g.balance > 0) funds.push({ id: newId(), plan_id: planId, source: "spare", name: "これまでの分", date: today, budget_month: null, amount: g.balance, status: "confirmed" });
+    for (const m of goalSchedule(g, s, cur, 6)) if (m.pay) funds.push({ id: newId(), plan_id: planId, source: "budget", name: `${+m.ym.slice(5)}月の予算から`, date: budgetFundDate(d, m.ym), budget_month: m.ym, amount: m.pay, status: "plan" });
+  }
+  if (plans.length) await backend.insert("plans", plans);
+  if (debts.length) await backend.insert("plan_debts", debts);
+  if (funds.length) await backend.insert("plan_funds", funds);
+  if (accounts.length) await backend.insert("account_entries", accounts, { onConflict: "source_ref" });
+  for (const e of d.accounts) if (e.source === "goal" && e.status === "plan" && !e.locked) await backend.remove("account_entries", e.id);
+  for (const e of d.cards) if (e.source === "goal" && e.status === "plan" && !e.locked && !e.merged_into) await backend.remove("card_entries", e.id);
+  for (const g of active) await backend.update("goals", g.id, { active: false });
+  await backend.upsertKeyed("settings", [{ data: { ...s, plansFrom: new Date().toISOString() } }]);
+  return true;
+}
+
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); return true; }
   if (await migrate4(raw, d)) return true;
   if (await migrate6(raw, d)) return true;
   if (await copyV2(raw, d)) return true;
+  if (await migratePlans(raw, d, today)) return true;
   let wrote = false;
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }
 
   const cur = ymOf(today);
   const months = [0, 1, 2, 3, 4, 5].map((k) => addMonths(cur, k));
-  // 目標から作った返済の予定の額を、目標マスタに合わせる（残高が減れば、臨時の返済の額も減る）
-  const gs = syncGoalPlans(d, months);
-  for (const u of gs.updates) { await backend.update(u.table, u.id, { amount: u.amount }); wrote = true; }
-  for (const r of gs.removes) { await backend.remove(r.table, r.id); wrote = true; }
-  for (const m of [missingRecurring(d, months), missingGoalPlans(d, months)]) {
+  // まとめて払う（使う）行を、計画の残高・使う日に合わせる
+  const ls = syncLumps(d);
+  if (ls.inserts.length) { await backend.insert("account_entries", ls.inserts as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
+  for (const u of ls.updates) { await backend.update("account_entries", u.id, u.patch as Row); wrote = true; }
+  for (const id of ls.removes) { await backend.remove("account_entries", id); wrote = true; }
+  for (const m of [missingRecurring(d, months)]) {
     if (m.accounts.length) { await backend.insert("account_entries", m.accounts as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
     if (m.cards.length) { await backend.insert("card_entries", m.cards as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
   }
@@ -187,7 +251,7 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
     if (Object.keys(patch).length) { await backend.update("card_entries", e.id, patch); wrote = true; }
   }
   for (const e of d.accounts) {
-    if (e.status === "plan" && (e.source === "recurring" || e.source === "goal") && e.date <= today) { await backend.update("account_entries", e.id, { status: "confirmed" }); wrote = true; }
+    if (e.status === "plan" && (e.source === "recurring" || e.source === "goal" || e.source === "plan") && e.date <= today) { await backend.update("account_entries", e.id, { status: "confirmed" }); wrote = true; }
   }
   const mailCard = d.settings.cards[0].id;
   for (const e of d.cards) {
@@ -242,7 +306,7 @@ export function useStore() {
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       // 新しい表・列がまだないとき（SQL を流す前）
-      setError(/(account_entries|card_entries|goals|deleted|every)/.test(m) ? `${m}（Supabase の SQL Editor で supabase/migrations/ の新しい SQL を実行してください）` : m);
+      setError(/(account_entries|card_entries|goals|deleted|every|plan_id|plan_role|budget_month|plans|months)/.test(m) ? `${m}（Supabase の SQL Editor で supabase/migrations/ の新しい SQL を実行してください）` : m);
     } finally {
       setLoading(false);
     }
@@ -382,9 +446,8 @@ export const actions = {
   async saveBudgets(month: string, map: Record<string, number>) {
     await backend.upsertKeyed("budgets", Object.entries(map).filter(([c]) => c !== RESERVE).map(([category, amount]) => ({ month, category, amount })));
   },
-  /** その月の目標用マイナスを手で直す。null なら目標マスタから出す値に戻す */
-  saveGoalMinus: (month: string, amount: number | null) =>
-    amount == null ? backend.removeBudget(month, GOAL_KEY) : backend.upsertKeyed("budgets", [{ month, category: GOAL_KEY, amount }]),
+  /** その月の予算を決める。null なら目安（給与 − 固定費 − 計画の分）に戻す */
+  saveMonthBudget: (month: string, budget: number | null) => backend.upsertKeyed("months", [{ month, budget }]),
 
   saveSettings: (s: Settings) => backend.upsertKeyed("settings", [{ data: s }]),
 
@@ -413,16 +476,49 @@ export const actions = {
     await backend.remove("recurring", id);
   },
 
-  async saveGoal(d: AppData, g: Partial<Goal> & { id?: string }, today: string) {
-    const { id, ...rest } = g;
-    if (!id) { await backend.insert("goals", [rest as Row]); return; }
-    await backend.update("goals", id, rest as Row);
-    await removeFuturePlans(d, (e) => e.source === "goal" && e.goal_id === id, today);
+  // ---------- 計画（§3.4） ----------
+
+  /** 計画を作る。返済は残高と毎月の支払い、買い物・貯蓄は毎月予算から入れる分。賞与から入れる分も作れる */
+  async createPlan(d: AppData, x: NewPlan) {
+    const id = newId();
+    await backend.insert("plans", [{ id, kind: x.kind, name: x.name, use_date: x.kind === "save" ? null : x.use_date, target: x.kind === "repay" ? 0 : x.amount, done: false, sort: d.plans.length }]);
+    const months = Array.from({ length: Math.max(0, x.months) }, (_, k) => addMonths(x.start, k));
+    if (x.kind === "repay") {
+      const debtId = newId();
+      await backend.insert("plan_debts", [{ id: debtId, plan_id: id, name: x.debtName || x.name, balance: x.amount, as_of: x.today, sort: 0 }]);
+      const rows = x.monthly ? months.map((m) => {
+        const date = x.card ? cardPayDate(closingFor(m, d.settings, x.card), d.settings, x.card) : `${m}-${String(Math.min(28, x.day || 27)).padStart(2, "0")}`;
+        return { id: newId(), account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${x.debtName || x.name}の支払い`, memo: "", date, amount: x.monthly, source: "plan", source_ref: null, recurring_id: null, goal_id: null, card: x.card, pair_id: null, locked: false, plan_id: id, debt_id: debtId, plan_role: "pay", budget_month: m };
+      }).filter((r) => !x.use_date || r.date < x.use_date) : [];
+      if (rows.length) await backend.insert("account_entries", rows);
+    } else if (x.monthly) {
+      const rows = months.map((m) => ({ id: newId(), plan_id: id, source: "budget", name: `${+m.slice(5)}月の予算から`, date: budgetFundDate(d, m), budget_month: m, amount: x.monthly, status: "plan" }))
+        .filter((r) => x.kind === "save" || !x.use_date || r.date < x.use_date);
+      if (rows.length) await backend.insert("plan_funds", rows);
+    }
+    if (x.bonus) await backend.insert("plan_funds", [{ id: newId(), plan_id: id, source: "bonus", name: "賞与から", date: x.bonusDate, budget_month: null, amount: x.bonus, status: "plan" }]);
+    return id;
   },
-  async deleteGoal(d: AppData, id: string, today: string) {
-    await removeFuturePlans(d, (e) => e.source === "goal" && e.goal_id === id, today);
-    await backend.remove("goals", id);
+  updatePlan: (id: string, patch: Partial<Plan>) => backend.update("plans", id, patch as Row),
+  /** 計画を消す。計画の取引のうち、まだ予定のものは消す（確定したものは残し、つながりだけ外れる） */
+  async deletePlan(d: AppData, id: string) {
+    for (const e of d.accounts) if (e.plan_id === id && e.status === "plan") await backend.remove("account_entries", e.id);
+    await backend.remove("plans", id);
   },
+  addDebt: (planId: string, name: string, balance: number, today: string, sort: number) => backend.insert("plan_debts", [{ plan_id: planId, name, balance, as_of: today, sort }]),
+  /** 残高を直す（見た日は今日にする） */
+  updateDebt: (id: string, patch: Partial<PlanDebt>) => backend.update("plan_debts", id, patch as Row),
+  deleteDebt: (id: string) => backend.remove("plan_debts", id),
+  /** 計画の支払いを足す（口座明細の予定） */
+  addPlanPay: (p: Plan, x: { name: string; date: string; amount: number; card: string | null; debt_id: string | null; budget_month: string }) =>
+    backend.insert("account_entries", [{ account: "bank", direction: "out", status: "plan", group: "other", category: null, memo: "", source: "plan", source_ref: null, recurring_id: null, goal_id: null, pair_id: null, locked: false, plan_id: p.id, plan_role: "pay", ...x }]),
+  /** 計画の取引を直す（名前・額・日・予定か確定か）。自動で直さないように locked にする */
+  updatePlanEntry: (id: string, patch: Partial<AccountEntry>) => backend.update("account_entries", id, { ...patch, locked: true } as Row),
+  deletePlanEntry: (id: string) => backend.remove("account_entries", id),
+  addFund: (p: Plan, x: { source: FundSource; name: string; date: string; budget_month: string | null; amount: number }) => backend.insert("plan_funds", [{ plan_id: p.id, status: "plan", ...x }]),
+  updateFund: (id: string, patch: Partial<PlanFund>) => backend.update("plan_funds", id, patch as Row),
+  deleteFund: (id: string) => backend.remove("plan_funds", id),
+  setStatus: (t: "account_entries" | "plan_funds", id: string, status: Status) => backend.update(t, id, t === "account_entries" ? { status, locked: true } : { status }),
 
   saveRule: (pattern: string, category: string) => backend.insert("rules", [{ pattern, category }], { onConflict: "pattern", merge: true }),
   deleteRule: (id: string) => backend.remove("rules", id),
@@ -464,6 +560,22 @@ export const actions = {
     return `明細・予定 ${json.entries?.length ?? 0}件、残高 ${balances.length}件、定期 ${rec.length}件、目標 ${goals.length}件を取り込みました`;
   },
 };
+
+export interface NewPlan {
+  kind: PlanKind;
+  name: string;
+  amount: number; // 返済：いまの残高・買い物：金額・貯蓄：目標額
+  use_date: string | null;
+  monthly: number; // 返済：毎月の支払い・買い物と貯蓄：毎月予算から入れる額
+  start: string; // 始める月
+  months: number; // 何か月分作るか
+  card: string | null; // 返済：どのカードの請求と一緒に払うか（null は口座から）
+  day: number; // 返済：口座から払う日
+  debtName: string;
+  bonus: number;
+  bonusDate: string;
+  today: string;
+}
 
 export interface ImportFile {
   format: string;

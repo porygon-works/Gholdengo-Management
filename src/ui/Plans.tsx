@@ -2,6 +2,7 @@ import { isLive, ymOf, type AccountEntry, type CardEntry } from "../engine";
 import type { AppData } from "../data/store";
 import { Empty, ownCost, signed, yen, ymLabel } from "./common";
 import { AccountRow, CardRow } from "./Ledger";
+
 import type { Open } from "./Sheets";
 
 /** 予定の画面。ヘッダーの月で切り替える。今月を見ているときは、日付が過ぎた手入力の予定も上に出す */
@@ -29,7 +30,7 @@ export function Plans({ data, month, today, onOpen, onAdd }: { data: AppData; mo
     <>
       <section>
         <div className="btns"><button className="btn" onClick={onAdd}>追加</button></div>
-        <div className="note">給与・賞与・急な入金や、決まっている大きな出費を入れます。定期マスタと目標マスタから作った予定は、計上日が来たら自動で確定になります（三井の予定は、メールの明細とまとまります）。</div>
+        <div className="note">給与・賞与・急な入金や、決まっている大きな出費を入れます。定期と計画から作った予定は、計上日が来たら自動で確定になります。</div>
       </section>
       {overdue.length > 0 && (
         <section>

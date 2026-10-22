@@ -1,62 +1,7 @@
 import { useState } from "react";
-import { accountFlow, accountNow, addMonths, cardPayDate, goalOutlook, ymOf } from "../engine";
+import { accountNow } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
-import { accountTitle, Chip, Empty, Field, md, NumInput, Sheet, signed, toast, yen, ymLabel } from "./common";
-import type { Open } from "./Sheets";
-
-/** 目標の見通し（§5.7）。目標マスタは設定で直す */
-export function GoalsView({ data, today }: { data: AppData; today: string }) {
-  const out = goalOutlook(data, ymOf(today), 36);
-  if (!out.length) return <Empty>目標がありません。設定→目標で入れてください</Empty>;
-  return (
-    <>
-      {out.map((o) => (
-        <section key={o.goal.id}>
-          <h2>{o.goal.name} <small>{o.goal.kind === "repay" ? `残高 ${yen(o.goal.balance)}円` : `目標 ${yen(o.goal.target)}円`}・毎月 {yen(o.goal.monthly)}円</small></h2>
-          <div className="panel scroll">
-            <div className="legend" style={{ justifyContent: "space-between" }}><span>{o.goal.kind === "repay" ? "0 になる月" : "目標額に届く月"}</span><b>{o.doneYm ? ymLabel(o.doneYm) : "36か月では届かない"}</b></div>
-            <table className="tbl">
-              <thead><tr><th>月</th><th>毎月</th><th>臨時</th><th>{o.goal.kind === "repay" ? "残り" : "たまった額"}</th></tr></thead>
-              <tbody>{o.months.filter((m, i) => i < 13 || m.pay || m.lump).slice(0, 18).map((m) => (
-                <tr key={m.ym}><td>{m.ym.slice(2, 4)}/{+m.ym.slice(5)}</td><td className="num">{m.pay ? yen(m.pay) : "―"}</td><td className="num">{m.lump ? yen(m.lump) : "―"}</td><td className="num">{yen(m.left)}</td></tr>
-              ))}</tbody>
-            </table>
-            <div className="note">利息・手数料は入れていません。</div>
-          </div>
-        </section>
-      ))}
-    </>
-  );
-}
-
-/** 口座の見通し（通帳の形）：いまの口座残高から、来月の引落日のあとまで */
-export function Passbook({ data, today, onOpen }: { data: AppData; today: string; onOpen: (o: Open) => void }) {
-  const to = cardPayDate(addMonths(ymOf(today), 1), data.settings);
-  const f = accountFlow(data, today, to);
-  if (!f) return <Empty>残高を入れると出ます</Empty>;
-  return (
-    <section>
-      <h2>口座の動き <small>今日〜{md(to)}の前日・予定を含む</small></h2>
-      <div className="panel scroll">
-        <table className="tbl">
-          <thead><tr><th>日付</th><th style={{ textAlign: "left" }}>摘要</th><th>お支払</th><th>お預り</th><th>残高</th></tr></thead>
-          <tbody>
-            <tr><td className="num">{md(today)}</td><td className="memo">口座残高（いま）</td><td /><td /><td className="num">{yen(f.now.bank)}</td></tr>
-            {f.rows.map((r) => (
-              <tr key={r.entry.id} className="tap" onClick={() => onOpen({ type: "account", entry: r.entry })}>
-                <td className="num">{md(r.date)}</td>
-                <td className="memo">{accountTitle(r.entry)}{r.entry.status === "plan" && <> <Chip kind="warn">{r.entry.group === "card" ? "見込み" : "予定"}</Chip></>}</td>
-                <td className="num">{r.delta < 0 ? yen(-r.delta) : ""}</td>
-                <td className="num pos">{r.delta > 0 ? yen(r.delta) : ""}</td>
-                <td className={`num ${r.balance < 0 ? "neg" : ""}`}>{signed(r.balance)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
+import { accountTitle, Field, md, NumInput, Sheet, signed, toast, yen } from "./common";
 
 /** 口座と財布：残高を直す・ATM・履歴 */
 export function BalanceSheet({ store, data, today, onClose }: { store: Store; data: AppData; today: string; onClose: () => void }) {

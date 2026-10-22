@@ -1,4 +1,4 @@
-// 計算エンジンで使う型。DBの列名と同じ名前にしている（supabase/migrations を参照）。仕様は docs/SPEC.md（v3）
+// 計算エンジンで使う型。DBの列名と同じ名前にしている（supabase/migrations を参照）。仕様は docs/SPEC.md（v4）
 
 export type Status = "plan" | "confirmed";
 
@@ -10,7 +10,7 @@ export type Direction = "in" | "out";
 export type AccountGroup = "variable" | "fixed" | "tatekae" | "card" | "other" | "salary" | "extra" | "refund";
 export const OUT_GROUPS: AccountGroup[] = ["variable", "fixed", "tatekae", "card", "other"];
 export const IN_GROUPS: AccountGroup[] = ["salary", "extra", "refund", "other"];
-export type AccountSource = "manual" | "recurring" | "card_bill" | "goal" | "migration";
+export type AccountSource = "manual" | "recurring" | "card_bill" | "goal" | "plan" | "migration";
 
 export interface AccountEntry {
   id: string;
@@ -30,6 +30,11 @@ export interface AccountEntry {
   card: string | null; // 大費目がクレカ支払いのとき、どのカードの請求か
   pair_id: string | null; // ATM のように2行で1つの動きのときの相手
   locked: boolean; // 本人が直した。自動で作り直さない
+  plan_id?: string | null; // 計画の取引（§3.4）
+  debt_id?: string | null; // 返済の計画の支払いが、どの残高の分か
+  plan_role?: PlanRole | null; // 支払い（毎月など）か、まとめて払う（使う）か
+  budget_month?: string | null; // 計画の支払いで、予算を減らす月（YYYY-MM）。空なら計上日の月
+  billTotal?: number; // クレカ支払いの行：カード会社の請求額（計画の支払いを引く前）
   at?: string; // 入れた時刻（残高を直した日と同じ日の明細を、直す前か後か分けるため）
 }
 
@@ -95,7 +100,7 @@ export interface Recurring {
 
 export interface Lump { date: string; amount: number; memo: string }
 
-/** 目標マスタ（§3.4） */
+/** 前の版の目標マスタ。v4 で計画に写す（src/data/store.ts） */
 export interface Goal {
   id: string;
   kind: "repay" | "save";
@@ -111,6 +116,55 @@ export interface Goal {
   lumps: Lump[]; // 臨時の返済・積立
   active: boolean;
   sort: number;
+}
+
+// ---------- 計画（§3.4） ----------
+
+export type PlanKind = "repay" | "buy" | "save";
+export type PlanRole = "pay" | "lump";
+export const PLAN_KIND_LABEL: Record<PlanKind, string> = { repay: "返済", buy: "買い物", save: "貯蓄" };
+
+/** 計画。返済はまとめて返す日に残りを返し、買い物は使う日に使う。貯蓄は使う日なし */
+export interface Plan {
+  id: string;
+  kind: PlanKind;
+  name: string;
+  use_date: string | null;
+  target: number; // 買い物の金額・貯蓄の目標額（返済は残高から出す）
+  done: boolean;
+  sort: number;
+}
+
+/** 返済の計画の残高（カードのサイトで見た額と、その日） */
+export interface PlanDebt {
+  id: string;
+  plan_id: string;
+  name: string;
+  balance: number;
+  as_of: string;
+  sort: number;
+}
+
+export type FundSource = "budget" | "bonus" | "spare";
+export const FUND_SOURCE_LABEL: Record<FundSource, string> = { budget: "予算から", bonus: "賞与から", spare: "予備から" };
+
+/** 確保額に入れる分。口座のお金は動かない（口座に残しておく額として数える） */
+export interface PlanFund {
+  id: string;
+  plan_id: string;
+  source: FundSource;
+  name: string;
+  date: string; // 確保額に入る日
+  budget_month: string | null; // 予算から入れるとき、予算を減らす月
+  amount: number;
+  status: Status;
+}
+
+/** 月ごとに決める予算。budget が null なら目安（§5.1）をそのまま使う */
+export interface MonthSetting {
+  month: string;
+  budget: number | null;
+  memo: string;
 }
 
 export interface Budget {
@@ -145,11 +199,10 @@ export interface Settings {
   version: number; // データの形の版（src/data/store.ts で古い版を直す）
   v2CopiedAt?: string; // 前の版の表（entries・card_bills）から、この時刻までに入った行を写した
   labels?: Record<string, string>; // 大費目の名前を変えたもの（キーは大費目の id）
+  plansFrom?: string; // 前の版の目標マスタを計画に写した時刻（v4）
 }
 
 export const RESERVE = "予備";
-/** 予算マスタで、その月の目標用マイナスを手で直した値を入れる費目 */
-export const GOAL_KEY = "#目標用マイナス";
 
 export const DEFAULT_SETTINGS: Settings = {
   safety: 0,
@@ -184,6 +237,10 @@ export interface Data {
   balances: Balance[];
   recurring: Recurring[];
   goals: Goal[];
+  plans: Plan[];
+  debts: PlanDebt[];
+  funds: PlanFund[];
+  months: MonthSetting[];
   budgets: Budget[];
   rules: Rule[];
   settings: Settings;

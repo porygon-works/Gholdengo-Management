@@ -9,7 +9,7 @@ export const wday = (d: string) => "日月火水木金土"[new Date(d + "T00:00:
 
 export const STATUS_LABEL: Record<Status, string> = { plan: "予定", confirmed: "確定" };
 export const CARD_SOURCE_LABEL: Record<CardEntry["source"], string> = { manual: "手入力", card_flash: "カード速報", card_statement: "カード明細", recurring: "定期", goal: "目標", migration: "移行" };
-export const ACCOUNT_SOURCE_LABEL: Record<AccountEntry["source"], string> = { manual: "手入力", recurring: "定期", card_bill: "クレカ請求", goal: "目標", migration: "移行" };
+export const ACCOUNT_SOURCE_LABEL: Record<AccountEntry["source"], string> = { manual: "手入力", recurring: "定期", card_bill: "クレカ請求", goal: "目標", plan: "計画", migration: "移行" };
 export { ACCOUNT_GROUP_LABEL, CARD_GROUP_LABEL };
 
 export const cardTitle = (e: CardEntry) => e.name || e.shop || e.category || "クレカ";

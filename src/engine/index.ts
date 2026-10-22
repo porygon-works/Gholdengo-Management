@@ -4,3 +4,4 @@ export * from "./schedule";
 export * from "./merge";
 export * from "./compute";
 export * from "./rules";
+export * from "./plans";

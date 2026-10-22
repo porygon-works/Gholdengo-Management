@@ -166,3 +166,60 @@ pre.mail { white-space: pre-wrap; font-size: 12px; background: var(--sunk); padd
 .tbl.wide { font-size: 12.5px; }
 .tbl.wide td, .tbl.wide th { padding-left: 4px; padding-right: 4px; }
 .tbl.wide td:first-child { min-width: 4.5em; }
+
+/* v4：ダッシュボード・口座の見通し・計画 */
+.lnk { border: 0; background: none; color: var(--accent); font-weight: 700; font-size: 13px; cursor: pointer; padding: 0; }
+.crow { display: grid; grid-template-columns: 6.5em 1fr auto; gap: 10px; align-items: center; font-size: 14px; padding: 5px 0; cursor: pointer; background: none; border: 0; width: 100%; text-align: left; }
+.crow .c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crow .bar { height: 8px; }
+.crow .nb { text-align: right; white-space: nowrap; font-weight: 600; }
+.crow .nb small { color: var(--mut); font-weight: 400; font-size: 11px; }
+.kv { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 14px; }
+.kv b { white-space: nowrap; }
+.tapkv { background: none; border: 0; padding: 0; width: 100%; cursor: pointer; text-align: left; }
+.chart { display: block; width: 100%; height: auto; touch-action: pan-y; cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.chart.mini { cursor: pointer; }
+.chart text { font-family: var(--f-num); }
+.zoom { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.readout { background: var(--sunk); border-radius: 10px; padding: 8px 10px; display: grid; gap: 2px; font-size: 13px; }
+.readout .h { font-weight: 700; }
+.readout .kv { font-size: 13px; }
+.readout .ev { font-size: 12px; color: var(--mut); }
+.sw.line { width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+details.why summary, details.panel summary { font-size: 13px; color: var(--accent); font-weight: 700; cursor: pointer; }
+.tbl .cyc td { font-weight: 700; background: var(--sunk); }
+.tbl .grp td { color: var(--mut); font-size: 11px; padding-top: 8px; border-bottom: 0; }
+.tbl .mh td { background: var(--sunk); font-weight: 700; font-size: 12px; text-align: left; }
+.tbl.plans td.memo { min-width: 9em; }
+.tbl.plans .prow td { border-bottom: 0; padding-bottom: 0; }
+.tbl.plans .pnext td { font-size: 12px; color: var(--mut); padding-top: 0; text-align: left; }
+.sub { font-size: 11px; color: var(--mut); font-weight: 400; white-space: normal; }
+.chip.kind { font-weight: 700; margin-right: 6px; border-color: currentColor; }
+.btnchip { cursor: pointer; background: none; font-family: inherit; }
+.tbl.edit td { vertical-align: middle; }
+.tbl.edit td:nth-child(2) { text-align: left; min-width: 8em; }
+.cell { border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 3px 5px; width: 100%; min-width: 6em; }
+.cell:hover, .cell:focus { border-color: var(--line); background: var(--bg); }
+.cell.date { min-width: 8.5em; font-family: var(--f-num); }
+.cellmoney input { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 3px 6px 3px 20px !important; width: 7.5em; height: 32px; font-family: var(--f-num); }
+.cellmoney::before { left: 7px; }
+.x { border: 0; background: none; color: var(--mut); font-size: 18px; cursor: pointer; padding: 0 4px; }
+.planhead { display: flex; align-items: center; gap: 4px; }
+.planhead .cell { font-weight: 700; font-size: 16px; }
+.sheet h4 { margin: 4px 0 0; font-size: 14px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.sheet h4 small { font-weight: 400; font-size: 11px; color: var(--mut); }
+.btns.end { justify-content: flex-end; }
+.tabs button { padding-left: 2px; padding-right: 2px; font-size: 11px; }
+.plines { display: grid; }
+.pline { display: grid; grid-template-columns: 4.2em 1fr; gap: 2px 8px; padding: 8px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.pline:has(> .pmain:only-child) { grid-template-columns: 1fr; }
+.pline.tot { font-weight: 700; }
+.pmain { display: grid; gap: 4px; min-width: 0; }
+.prow2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.prow2 .amt { min-width: 7.5em; text-align: right; }
+.plines .kv.tot { padding-top: 8px; font-weight: 700; }
+.datebtn { text-align: left; cursor: pointer; min-width: 0; padding-top: 6px; }
+.chart:focus { outline: none; }
+.chart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.crow { grid-template-columns: 6.5em 1fr 9.5em; }
+.pline.tot .datebtn { border: 0; background: none; }

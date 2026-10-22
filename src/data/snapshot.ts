@@ -1,4 +1,4 @@
-import { accountFlow, addMonths, computeMonth, goalBalanceAt, goalOutlook, monthBase, nextPayments, PAY_GROUP_LABEL, ymOf } from "../engine";
+import { accountFlow, addMonths, computeMonth, forecast, monthBase, nextPayments, PAY_GROUP_LABEL, PLAN_KIND_LABEL, planDebts, planEntries, planFunds, planStatus, reserveAt, debtLeft, ymOf } from "../engine";
 import type { AppData } from "./store";
 
 // Claude が読むための書き出し（format: gholdengo-snapshot-v1）。アプリが開くたびに Supabase の snapshots に保存し、
@@ -13,11 +13,12 @@ export function summary(d: AppData, today: string) {
   const f = accountFlow(d, today);
   const n = nextPayments(d, next);
   const nb = monthBase(d, next);
+  const fc = forecast(d, today);
   return {
     today,
     thisMonth: {
       month: ym, budget: v.T, remaining: v.R, variableUsed: v.U, variablePlanned: v.P, fixedOver: v.fixedOver,
-      base: { salary: v.base.salary, extra: v.base.extra, fixed: v.base.fixed, goalMinus: v.base.goal, goalMinusManual: v.base.goalManual },
+      base: { salary: v.base.salary, extra: v.base.extra, fixed: v.base.fixed, planMinus: v.base.plan, guide: v.base.auto, decided: v.base.manual },
       categories: v.cats.filter((c) => c.budget || c.used || c.planned).map((c) => ({ category: c.cat, fixed: c.fixed, budget: c.budget, used: c.used, planned: c.planned, remaining: c.rem })),
     },
     account: f && {
@@ -25,11 +26,18 @@ export function summary(d: AppData, today: string) {
       flow: f.rows.map((r) => ({ date: r.date, name: r.entry.name || r.entry.category, amount: r.delta, balanceAfter: r.balance, status: r.entry.status, group: r.entry.group })),
     },
     nextMonthPayments: { month: next, total: n.total, groups: n.groups.map((g) => ({ group: PAY_GROUP_LABEL[g.group], amount: g.amount, items: g.items.map((x) => ({ date: x.date, name: x.name, from: x.from, amount: x.amount, plan: x.plan })) })) },
-    nextMonthBudget: { month: next, budget: nb.T, base: { salary: nb.salary, extra: nb.extra, fixed: nb.fixed, goalMinus: nb.goal } },
-    goals: goalOutlook(d, ym, 36).map((o) => ({
-      name: o.goal.name, kind: o.goal.kind, balanceNow: goalBalanceAt(o.goal, d.settings, today), monthly: o.goal.monthly, doneMonth: o.doneYm,
-      schedule: o.months.filter((m) => m.pay || m.lump).slice(0, 12).map((m) => ({ month: m.ym, pay: m.pay, lump: m.lump, left: m.left })),
-    })),
+    nextMonthBudget: { month: next, budget: nb.T, base: { salary: nb.salary, extra: nb.extra, fixed: nb.fixed, planMinus: nb.plan, guide: nb.auto, decided: nb.manual } },
+    // 確保額 ＝ 給料日の前日の口座残高（見込み）。計画ごとに入れた分と、予備
+    reserves: fc ? fc.eves.map((e) => reserveAt(d, fc, e)).filter(Boolean) : [],
+    plans: d.plans.map((p) => {
+      const st = planStatus(d, p, fc);
+      return {
+        id: p.id, name: p.name, kind: PLAN_KIND_LABEL[p.kind], useDate: p.use_date, need: st.need, collected: st.got, short: st.short, ok: st.ok, done: p.done,
+        debts: planDebts(d, p).map((x) => ({ name: x.name, balance: x.balance, asOf: x.as_of, left: debtLeft(d, p, x) })),
+        entries: planEntries(d, p).map((e) => ({ date: e.date, name: e.name, amount: e.amount, status: e.status, role: e.plan_role, card: e.card })),
+        funds: planFunds(d, p).map((f) => ({ date: f.date, source: f.source, name: f.name, amount: f.amount, status: f.status })),
+      };
+    }),
   };
 }
 
@@ -43,7 +51,10 @@ export function snapshot(d: AppData, today: string) {
     summary: summary(d, today),
     settings: d.settings,
     budgets: d.budgets,
-    goals: d.goals,
+    months: d.months,
+    plans: d.plans,
+    plan_debts: d.debts,
+    plan_funds: d.funds,
     recurring: d.recurring,
     rules: d.rules,
     balances: d.balances,

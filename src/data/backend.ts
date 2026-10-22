@@ -3,13 +3,16 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // データの置き場所。Supabase の設定があれば Supabase、なければブラウザの中（お試しモード）
 
 // entries・card_bills・debts は前の版（v2）の表。新しい表（account_entries・card_entries・goals）へ写すために読む
-export type Table = "account_entries" | "card_entries" | "goals" | "entries" | "balances" | "card_bills" | "recurring" | "budgets" | "rules" | "debts" | "settings" | "review";
+export type Table = "account_entries" | "card_entries" | "goals" | "entries" | "balances" | "card_bills" | "recurring" | "budgets" | "rules" | "debts" | "settings" | "review" | V4Table;
+/** v4 の表（0007_plans_months.sql）。まだ作っていなければ空として読む */
+export type V4Table = "plans" | "plan_debts" | "plan_funds" | "months";
+export const V4_TABLES: V4Table[] = ["plans", "plan_debts", "plan_funds", "months"];
 /** 書くだけで読まない表（Claude が読むための書き出し） */
 export type WriteOnly = "snapshots";
-export const TABLES: Table[] = ["account_entries", "card_entries", "goals", "entries", "balances", "card_bills", "recurring", "budgets", "rules", "debts", "settings", "review"];
+export const TABLES: Table[] = ["account_entries", "card_entries", "goals", "entries", "balances", "card_bills", "recurring", "budgets", "rules", "debts", "settings", "review", ...V4_TABLES];
 
 export type Row = Record<string, unknown>;
-export type Raw = Record<Table, Row[]>;
+export type Raw = Record<Table, Row[]> & { missing?: V4Table[] };
 
 export interface Backend {
   mode: "supabase" | "local";
@@ -19,7 +22,7 @@ export interface Backend {
   update(t: Table, id: string, patch: Row): Promise<void>;
   remove(t: Table, id: string): Promise<void>;
   /** budgets・settings・snapshots のように id のない表の書き込み */
-  upsertKeyed(t: "budgets" | "settings" | WriteOnly, rows: Row[]): Promise<void>;
+  upsertKeyed(t: "budgets" | "settings" | "months" | WriteOnly, rows: Row[]): Promise<void>;
   removeBudget(month: string, category: string): Promise<void>;
 }
 
@@ -41,17 +44,21 @@ function supabaseBackend(sb: SupabaseClient): Backend {
     mode: "supabase",
     async load() {
       const out = {} as Raw;
+      const missing: V4Table[] = [];
       await Promise.all(TABLES.map(async (t) => {
         // 1000行ずつ全部読む
         const rows: Row[] = [];
         for (let from = 0; ; from += 1000) {
           const r = await sb.from(t).select("*").range(from, from + 999);
+          // v4 の表がまだなければ（SQL を流す前）、空として読む
+          if (r.error && (V4_TABLES as string[]).includes(t)) { missing.push(t as V4Table); break; }
           check(r);
           rows.push(...(r.data as Row[]));
           if ((r.data?.length ?? 0) < 1000) break;
         }
         out[t] = rows;
       }));
+      if (missing.length) out.missing = missing;
       return out;
     },
     async insert(t, rows, opts) {
@@ -66,7 +73,7 @@ function supabaseBackend(sb: SupabaseClient): Backend {
     async upsertKeyed(t, rows) {
       if (!rows.length) return;
       const user_id = await uid();
-      check(await sb.from(t).upsert(rows.map((r) => ({ ...r, user_id })), { onConflict: t === "budgets" ? "user_id,month,category" : "user_id" }));
+      check(await sb.from(t).upsert(rows.map((r) => ({ ...r, user_id })), { onConflict: t === "budgets" ? "user_id,month,category" : t === "months" ? "user_id,month" : "user_id" }));
     },
     async removeBudget(month, category) { check(await sb.from("budgets").delete().eq("month", month).eq("category", category)); },
   };
@@ -92,6 +99,9 @@ const DEFAULTS: Partial<Record<Table, Row>> = {
   account_entries: { account: "bank", category: null, name: "", memo: "", source: "manual", source_ref: null, recurring_id: null, goal_id: null, card: null, pair_id: null, locked: false },
   card_entries: { card: "smbc", group: "variable", category: null, name: "", shop: "", memo: "", tatekae: 0, source: "manual", source_ref: null, merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: null },
   goals: { card: null, balance: 0, as_of: null, target: 0, monthly: 0, day: 27, start_month: null, end_month: null, lumps: [], active: true, sort: 0, source_ref: null },
+  plans: { name: "", use_date: null, target: 0, done: false, sort: 0 },
+  plan_debts: { name: "", balance: 0, sort: 0 },
+  plan_funds: { name: "", budget_month: null, amount: 0, status: "plan" },
 };
 
 function localBackend(): Backend {
@@ -118,16 +128,24 @@ function localBackend(): Backend {
       const d = readLocal();
       d[t] = d[t].filter((x) => x.id !== id);
       if (t === "entries" || t === "card_entries") for (const e of d[t]) if (e.merged_into === id) e.merged_into = null;
+      // 計画を消したら、残高と確保額に入れる分も消し、取引のつながりを外す（Supabase の on delete と同じ）
+      if (t === "plans") {
+        d.plan_debts = d.plan_debts.filter((x) => x.plan_id !== id);
+        d.plan_funds = d.plan_funds.filter((x) => x.plan_id !== id);
+        for (const e of d.account_entries) if (e.plan_id === id) { e.plan_id = null; e.debt_id = null; }
+      }
+      if (t === "plan_debts") for (const e of d.account_entries) if (e.debt_id === id) e.debt_id = null;
       writeLocal(d);
     },
     async upsertKeyed(t, rows) {
       const d = readLocal();
       if (t === "snapshots") { (d as unknown as Record<string, Row[]>).snapshots = rows.slice(-1); writeLocal(d); return; }
       for (const r of rows) {
-        const i = t === "budgets" ? d.budgets.findIndex((x) => x.month === r.month && x.category === r.category) : 0;
-        if (t === "settings") d.settings = [{ ...(d.settings[0] || {}), ...r }];
-        else if (i >= 0) d.budgets[i] = { ...d.budgets[i], ...r };
-        else d.budgets.push(r);
+        if (t === "settings") { d.settings = [{ ...(d.settings[0] || {}), ...r }]; continue; }
+        const list = t === "months" ? d.months : d.budgets;
+        const i = list.findIndex((x) => x.month === r.month && (t === "months" || x.category === r.category));
+        if (i >= 0) list[i] = { ...list[i], ...r };
+        else list.push(r);
       }
       writeLocal(d);
     },

@@ -3,6 +3,7 @@ import { computeMonth, isLive, ymOf, type AccountEntry, type CardEntry, type Spe
 import type { AppData } from "../data/store";
 import { ACCOUNT_GROUP_LABEL, accountTitle, Bar, CARD_GROUP_LABEL, cardTitle, Chip, Empty, md, money, ownCost, signed, StatusChip, wday, yen } from "./common";
 import type { Open } from "./Sheets";
+import { Plans } from "./Plans";
 
 type OnOpen = (o: Open) => void;
 
@@ -33,7 +34,7 @@ export function AccountRow({ e, onOpen, showCat }: { e: AccountEntry; onOpen: On
 
 const SpendRow = ({ x, data, onOpen }: { x: Spend; data: AppData; onOpen: OnOpen }) => (x.card ? <CardRow e={x.card} data={data} onOpen={onOpen} /> : <AccountRow e={x.account!} onOpen={onOpen} />);
 
-type Mode = "cat" | "time";
+type Mode = "cat" | "time" | "plan";
 
 /** 日付ごと：その月のクレカ明細と口座明細を、日付ごとに新しい順に並べる */
 function Timeline({ data, month, onOpen }: { data: AppData; month: string; onOpen: OnOpen }) {
@@ -64,7 +65,7 @@ function Timeline({ data, month, onOpen }: { data: AppData; month: string; onOpe
   );
 }
 
-export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: AppData; month: string; today: string; focusCat: string | null; onOpen: OnOpen; onAdd: () => void }) {
+export function Ledger({ data, month, today, focusCat, onOpen, onAdd, onAddPlan }: { data: AppData; month: string; today: string; focusCat: string | null; onOpen: OnOpen; onAdd: () => void; onAddPlan: () => void }) {
   const v = computeMonth(data, month, today);
   const [mode, setMode] = useState<Mode>(() => { try { return (localStorage.getItem("gholdengo.ledger") as Mode) || "cat"; } catch { return "cat"; } });
   useEffect(() => { try { localStorage.setItem("gholdengo.ledger", mode); } catch { /* なし */ } }, [mode]);
@@ -98,10 +99,11 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
         <div className="seg" role="tablist" aria-label="表示">
           <button role="tab" aria-pressed={mode === "cat"} onClick={() => setMode("cat")}>費目ごと</button>
           <button role="tab" aria-pressed={mode === "time"} onClick={() => setMode("time")}>日付ごと</button>
+          <button role="tab" aria-pressed={mode === "plan"} onClick={() => setMode("plan")}>予定</button>
         </div>
-        <div className="btns"><button className="btn" onClick={onAdd}>追加</button></div>
+        {mode !== "plan" && <div className="btns"><button className="btn" onClick={onAdd}>追加</button></div>}
       </section>
-      {mode === "time" ? <Timeline data={data} month={month} onOpen={onOpen} /> : (
+      {mode === "plan" ? <Plans data={data} month={month} today={today} onOpen={onOpen} onAdd={onAddPlan} /> : mode === "time" ? <Timeline data={data} month={month} onOpen={onOpen} /> : (
         <>
           {empty && <Empty>この月の明細はまだありません</Empty>}
           {v.unclassified.length > 0 && (
