@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, goalBalanceAt, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges, goalMinusAuto,
-  goalOutlook, goalSchedule, holidays, isBusinessDay, missingGoalPlans, missingRecurring, monthBase, monthlyFor, nextPayday, nextPayments, normalizeShop,
-  planGoals, recurringDate, recurringDue, syncGoalPlans, ruleFor, shiftBusiness, syncBills,
+  ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges,
+  goalSchedule, holidays, isBusinessDay, missingRecurring, monthBase, nextPayday, nextPayments, normalizeShop,
+  recurringDate, recurringDue, ruleFor, shiftBusiness, syncBills,
   type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
 } from "./index";
 
@@ -22,7 +22,7 @@ const G = (p: Partial<Goal>): Goal => ({
   id: p.id ?? `g${++n}`, kind: "repay", name: "リボ", card: "saison", balance: 30000, as_of: "2026-10-19", target: 0, monthly: 10000, day: 27,
   start_month: null, end_month: null, lumps: [], active: true, sort: 0, ...p,
 });
-const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], budgets: [], rules: [], settings: S, ...p });
+const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], plans: [], debts: [], funds: [], months: [], budgets: [], rules: [], settings: S, ...p });
 const bal = (p: Partial<Data["balances"][number]> = {}) => ({ id: "b", date: "2026-10-19", bank: 300000, cash: 10000, paypay: 0, memo: "", ...p });
 
 describe("日付と祝日", () => {
@@ -78,8 +78,6 @@ describe("定期マスタ：何か月ごと・消した予定", () => {
   it("消した予定（removedRefs）は、また作らない", () => {
     const r = rec({});
     expect(missingRecurring({ recurring: [r], accounts: [], cards: [], settings: S, removedRefs: ["rec:r9:2026-11"] }, ["2026-11", "2026-12"]).cards.map((e) => e.date)).toEqual(["2026-12-10"]);
-    const g = G({ id: "g1", balance: 20000, monthly: 10000, card: "saison" });
-    expect(missingGoalPlans(D({ goals: [g], removedRefs: ["goal:g1:2026-11"] }), ["2026-11", "2026-12"]).cards.map((e) => e.source_ref)).toEqual(["goal:g1:2026-12"]);
   });
 });
 
@@ -157,22 +155,27 @@ describe("クレカの請求（口座明細のクレカ支払い）", () => {
 
 describe("今月の予算と残り予算", () => {
   const fixed = [{ month: "2026-10", category: "家賃", amount: 70000 }, { month: "2026-10", category: "通信", amount: 5000 }];
-  it("予算の元：給与・追加予算は口座明細の入金、固定費は固定費の予算、目標用マイナスは目標マスタ", () => {
+  it("予算の元：給与・追加予算は口座明細の入金、固定費は固定費の予算、計画の分は計画の支払いと予算から入れる分。決めた予算があればそれ", () => {
     const d = D({
       budgets: fixed,
-      goals: [G({ monthly: 10000, card: null, day: 27, balance: 50000 }), G({ kind: "save", balance: 0, target: 255000, monthly: 20000, start_month: "2026-10" })],
+      plans: [{ id: "p1", kind: "repay", name: "リボ", use_date: "2026-12-16", target: 0, done: false, sort: 0 }, { id: "p2", kind: "save", name: "貯金", use_date: null, target: 100000, done: false, sort: 1 }],
+      funds: [{ id: "f1", plan_id: "p2", source: "budget", name: "", date: "2026-11-26", budget_month: "2026-10", amount: 20000, status: "plan" }, { id: "f2", plan_id: "p2", source: "bonus", name: "", date: "2026-10-30", budget_month: null, amount: 5000, status: "plan" }],
       accounts: [
         A({ direction: "in", group: "salary", amount: 260000, date: "2026-10-15" }),
         A({ direction: "in", group: "extra", amount: 5000, date: "2026-10-20", status: "plan" }),
         A({ direction: "in", group: "refund", amount: 16000, date: "2026-10-25" }),
         A({ direction: "in", group: "other", name: "売却代金", amount: 40000, date: "2026-10-20" }),
+        A({ group: "other", category: null, amount: 10000, date: "2026-11-04", status: "plan", plan_id: "p1", plan_role: "pay", budget_month: "2026-10", source: "plan" }),
+        A({ group: "other", category: null, amount: 99000, date: "2026-12-16", status: "plan", plan_id: "p1", plan_role: "lump", source: "plan" }),
       ],
     });
     const b = monthBase(d, "2026-10");
-    expect([b.salary, b.extra, b.fixed, b.goal]).toEqual([260000, 5000, 75000, 30000]);
+    expect([b.salary, b.extra, b.fixed, b.plan, b.manual]).toEqual([260000, 5000, 75000, 30000, null]);
     expect(b.T).toBe(260000 + 5000 - 75000 - 30000);
-    const m = monthBase({ ...d, budgets: [...fixed, { month: "2026-10", category: "#目標用マイナス", amount: 12000 }] }, "2026-10");
-    expect([m.goal, m.goalAuto, m.goalManual]).toEqual([12000, 30000, true]);
+    const m = monthBase({ ...d, months: [{ month: "2026-10", budget: 90000, memo: "" }] }, "2026-10");
+    expect([m.T, m.auto, m.manual]).toEqual([90000, b.auto, 90000]);
+    // まとめて払う行は予算から引かない（確保額から払う）
+    expect(monthBase(d, "2026-12").plan).toBe(0);
   });
   it("残り予算 ＝ 予算 − クレカの変動費 − 口座の変動費の出金（自分の分・予定を含む）− 固定費の超過", () => {
     const d = D({
@@ -206,52 +209,15 @@ describe("今月の予算と残り予算", () => {
   });
 });
 
-describe("目標マスタ", () => {
+describe("前の版の目標マスタ（計画に写すときに使う）", () => {
   it("返済：残高の日より後の支払いから、残高が0になるまで。臨時の返済で早く終わる", () => {
     const g = G({ balance: 35000, monthly: 10000, as_of: "2026-10-19", card: "saison", lumps: [{ date: "2026-12-16", amount: 99999, memo: "賞与から" }] });
     const m = goalSchedule(g, S, "2026-10", 4);
     expect(m.map((x) => [x.ym, x.pay, x.lump, x.left])).toEqual([["2026-11", 10000, 0, 25000], ["2026-12", 10000, 15000, 0], ["2027-01", 0, 0, 0], ["2027-02", 0, 0, 0]]);
-    expect(goalOutlook(D({ goals: [g] }), "2026-10")[0].doneYm).toBe("2026-12");
-    // 残高は返済の日が来るたびに見込みで減る
-    expect([goalBalanceAt(g, S, "2026-11-03"), goalBalanceAt(g, S, "2026-11-04"), goalBalanceAt(g, S, "2026-12-16")]).toEqual([35000, 25000, 0]);
-    // 額を入れていない臨時の返済は、残り全部
-    const all = G({ balance: 35000, monthly: 10000, card: "saison", lumps: [{ date: "2026-12-16", amount: 0, memo: "賞与から全額" }] });
-    expect(goalSchedule(all, S, "2026-11", 2).map((x) => [x.pay, x.lump, x.left])).toEqual([[10000, 0, 25000], [10000, 15000, 0]]);
-    expect(missingGoalPlans(D({ goals: [all] }), ["2026-12"]).accounts.map((e) => e.amount)).toEqual([15000]);
   });
-  it("積立：始める月から目標額まで。目標用マイナスはその月に動いている目標の合計", () => {
+  it("積立：始める月から目標額まで", () => {
     const save = G({ kind: "save", balance: 0, target: 50000, monthly: 20000, start_month: "2027-01" });
     expect(goalSchedule(save, S, "2026-12", 5).map((x) => x.pay)).toEqual([0, 20000, 20000, 10000, 0]);
-    const d = D({ goals: [save, G({ balance: 30000, monthly: 10000, card: "saison" })] });
-    expect([goalMinusAuto(d, "2026-11"), goalMinusAuto(d, "2027-01")]).toEqual([10000, 30000]);
-    // 先の月も、残高の日から数えて0になったら返済は終わる（30,000円・毎月10,000円 → 11〜1月）
-    expect([goalMinusAuto(d, "2027-01"), goalMinusAuto(d, "2027-02")]).toEqual([30000, 20000]);
-  });
-  it("返済の予定を作る：カードなら締め月の最後の日の分割（返済）、臨時は口座の出金。もう同じ締め月にあれば作らない", () => {
-    const g = G({ id: "g1", balance: 25000, monthly: 10000, card: "saison", lumps: [{ date: "2026-12-16", amount: 15000, memo: "賞与から" }] });
-    const out = missingGoalPlans(D({ goals: [g] }), ["2026-11", "2026-12"]);
-    expect(out.cards.map((e) => [e.card, e.group, e.date, e.amount])).toEqual([["saison", "installment", "2026-10-31", 10000], ["saison", "installment", "2026-11-30", 10000]]);
-    expect(out.accounts.map((e) => [e.date, e.amount, e.direction])).toEqual([["2026-12-16", 5000, "out"]]); // 残り 5,000円まで
-    const had = missingGoalPlans(D({ goals: [g], cards: [C({ card: "saison", group: "installment", category: null, date: "2026-10-31", amount: 10000 })] }), ["2026-11"]);
-    expect(had.cards).toHaveLength(0);
-  });
-});
-
-describe("目標から作った予定を目標に合わせる", () => {
-  it("残高や毎月の額が変わると、予定の額も変わる。残り全部の臨時の返済は、その月の返済を引いた額。いらなくなった予定は消す。本人が直した予定はそのまま", () => {
-    const g = G({ id: "g1", balance: 30000, monthly: 10000, card: null, day: 4, as_of: "2026-10-19", lumps: [{ date: "2026-12-15", amount: 0, memo: "賞与から全額" }] });
-    const made = missingGoalPlans(D({ goals: [g] }), ["2026-11", "2026-12", "2027-01"]).accounts.map((e, i) => ({ ...e, id: `p${i}` }));
-    expect(made.map((e) => [e.source_ref, e.amount])).toEqual([["goal:g1:2026-11", 10000], ["goal:g1:2026-12", 10000], ["goal:g1:lump:2026-12-15", 10000]]);
-    // 残高を 40,000 に直した → 臨時の返済は 20,000（11月・12月の返済を引いた残り）
-    const s1 = syncGoalPlans(D({ goals: [{ ...g, balance: 40000 }], accounts: made }), ["2026-11", "2026-12", "2027-01"]);
-    expect(s1.updates).toEqual([{ table: "account_entries", id: "p2", amount: 20000 }]);
-    // 毎月 20,000 にした → 11月 20,000・12月 10,000（残り）・臨時は 0 → 消す
-    const s2 = syncGoalPlans(D({ goals: [{ ...g, monthly: 20000 }], accounts: made }), ["2026-11", "2026-12", "2027-01"]);
-    expect(s2.updates).toEqual([{ table: "account_entries", id: "p0", amount: 20000 }]);
-    expect(s2.removes).toEqual([{ table: "account_entries", id: "p2" }]);
-    // 本人が直した予定はそのまま
-    const s3 = syncGoalPlans(D({ goals: [{ ...g, balance: 40000 }], accounts: made.map((e) => ({ ...e, locked: true })) }), ["2026-11", "2026-12", "2027-01"]);
-    expect([s3.updates, s3.removes]).toEqual([[], []]);
   });
 });
 
@@ -319,33 +285,12 @@ describe("口座", () => {
   });
 });
 
-describe("計画をつくる", () => {
-  const base = (p: Partial<Data> = {}) => D({
-    goals: [G({ balance: 60000, monthly: 10000, card: "saison" })],
-    budgets: [{ month: "2026-10", category: "家賃", amount: 70000 }],
-    settings: { ...S, salaryEstimate: 250000 },
-    ...p,
-  });
-  it("毎月の額から：リボを返してから積み立て、届く月を出す。賞与も回せる", () => {
-    const r = planGoals(base(), { from: "2026-11", monthly: 30000, useBonus: false, saved: 0, target: 60000 });
-    expect([r.payoffYm, r.reachYm]).toEqual(["2026-12", "2027-02"]);
-    expect(r.rows[0].free).toBe(250000 - 70000 - 30000);
-    const withBonus = planGoals(base({ accounts: [A({ direction: "in", group: "other", name: "賞与", amount: 100000, date: "2026-12-10", status: "plan" })] }), { from: "2026-11", monthly: 30000, useBonus: true, saved: 0, target: 60000 });
-    expect(withBonus.reachYm).toBe("2026-12");
-  });
-  it("達成したい月から：その月までに届く、いちばん少ない毎月の額（1,000円単位）", () => {
-    const m = monthlyFor(base(), { from: "2026-11", useBonus: false, saved: 0, target: 60000 }, "2027-04")!;
-    expect(m).toBe(20000);
-    expect(monthlyFor(base(), { from: "2026-11", useBonus: false, saved: 0, target: 1e9 }, "2027-01")).toBeNull();
-  });
-});
-
 describe("区分", () => {
   it("大費目の名前を変えると、画面で使う名前の表が変わる（計算は id のまま）", () => {
     applyLabels({ ...S, labels: { variable: "やりくり費", installment: "リボ" } });
-    expect([ACCOUNT_GROUP_LABEL.variable, CARD_GROUP_LABEL.variable, CARD_GROUP_LABEL.installment, PAY_GROUP_LABEL.installment, PAY_GROUP_LABEL.fixed]).toEqual(["やりくり費", "やりくり費", "リボ", "リボ", "固定費"]);
+    expect([ACCOUNT_GROUP_LABEL.variable, CARD_GROUP_LABEL.variable, CARD_GROUP_LABEL.installment, PAY_GROUP_LABEL.installment, PAY_GROUP_LABEL.fixed]).toEqual(["やりくり費", "やりくり費", "リボ", "計画の支払い", "固定費"]);
     applyLabels(S);
-    expect([ACCOUNT_GROUP_LABEL.variable, PAY_GROUP_LABEL.installment]).toEqual(["変動費", "分割の返済"]);
+    expect([ACCOUNT_GROUP_LABEL.variable, PAY_GROUP_LABEL.installment]).toEqual(["変動費", "計画の支払い"]);
   });
 });
 

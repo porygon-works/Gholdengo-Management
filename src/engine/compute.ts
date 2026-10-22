@@ -1,8 +1,9 @@
 import { addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardOf, cardPayDate, closingEnd, closingFor, closingMonth, ownCost, recurringDue } from "./schedule";
+import { cardOf, cardPayDate, closingFor, closingMonth, ownCost, recurringDue } from "./schedule";
+import { planMinus } from "./plans";
 import {
-  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, GOAL_KEY, isFixedCat, RESERVE,
+  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, isFixedCat, RESERVE,
   type AccountEntry, type Balance, type CardDef, type CardEntry, type Data, type Goal, type Settings,
 } from "./types";
 
@@ -69,6 +70,21 @@ export function billsFor(d: Data, payYm: string): Bill[] {
 }
 
 export const billName = (b: { card: CardDef; closingYm: string }) => `${b.card.name} ${+b.closingYm.slice(5)}月分`;
+
+/**
+ * 計画の支払いのうち、カードの請求と一緒に引き落とされるもの（リボの毎月の支払いなど）。
+ * カード会社の請求額（確定の額）にはこれが入っているので、クレカ支払いの行の額はこれを引いた額にする（二重に数えない）
+ */
+export function normalizeBills(accounts: AccountEntry[]): AccountEntry[] {
+  const part = new Map<string, number>();
+  for (const e of accounts) if (e.plan_id && e.plan_role === "pay" && e.card) part.set(`${e.card}:${e.date}`, (part.get(`${e.card}:${e.date}`) ?? 0) + e.amount);
+  if (!part.size) return accounts;
+  return accounts.map((e) => {
+    const k = `${e.card}:${e.date}`;
+    if (e.group !== "card" || e.source !== "card_bill" || !e.locked || !part.has(k)) return e;
+    return { ...e, billTotal: e.amount, amount: Math.max(0, e.amount - part.get(k)!) };
+  });
+}
 
 /** 請求の行を口座明細の形にする（まだ保存していないとき） */
 function billEntry(b: Bill, today: string): Omit<AccountEntry, "id"> {
@@ -153,112 +169,6 @@ export function goalSchedule(g: Goal, s: Settings, fromYm: string, n: number): G
   return out;
 }
 
-/** その月の目標用マイナスの自動の値 ＝ 動いている目標の毎月の額 ＋ 臨時の額 */
-export function goalMinusAuto(d: Data, ym: string): number {
-  return d.goals.filter((g) => g.active).reduce((a, g) => {
-    const m = goalSchedule(g, d.settings, ym, 1)[0];
-    return a + (m ? m.pay + m.lump : 0);
-  }, 0);
-}
-
-export const goalRef = (g: Goal, ym: string) => `goal:${g.id}:${ym}`;
-export const lumpRef = (g: Goal, date: string) => `goal:${g.id}:lump:${date}`;
-
-/**
- * 返済の目標から、まだ作っていない返済の予定を作る（§3.4）。
- * カードがあればクレカ明細（分割（返済））、なければ口座明細の出金。臨時の返済は口座明細の出金。
- * 同じカードの同じ締め月に分割（返済）の明細がもうあれば（定期のお金や前の版から来たもの）、作らない
- */
-export function missingGoalPlans(d: Data, months: string[]) {
-  const have = new Set([...d.accounts, ...d.cards].map((e) => e.source_ref).filter(Boolean).concat(d.removedRefs ?? []));
-  return goalPlans(d, months, have);
-}
-
-/** 目標から作る返済の予定（skip にある source_ref は除く） */
-function goalPlans(d: Data, months: string[], have: Set<string | null>) {
-  const s = d.settings;
-  const accounts: Omit<AccountEntry, "id">[] = [];
-  const cards: Omit<CardEntry, "id">[] = [];
-  for (const g of d.goals) {
-    if (!g.active || g.kind !== "repay") continue;
-    for (const m of goalSchedule(g, s, months[0], months.length)) {
-      if (!months.includes(m.ym)) continue;
-      if (m.pay > 0 && !have.has(goalRef(g, m.ym))) {
-        if (g.card) {
-          const c = cardOf(s, g.card).id;
-          const cym = closingFor(m.ym, s, c);
-          const dup = d.cards.some((e) => isLive(e) && e.group === "installment" && cardOf(s, e.card).id === c && closingMonth(e.date, s, c) === cym && (!e.goal_id || e.goal_id === g.id) && e.source_ref !== goalRef(g, m.ym));
-          if (!dup) cards.push({ card: c, status: "plan", date: closingEnd(cym, s, c), amount: m.pay, group: "installment", category: null, name: `${g.name}の返済`, shop: "", memo: "", tatekae: 0, source: "goal", source_ref: goalRef(g, m.ym), merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: g.id });
-        } else {
-          accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}の返済`, memo: "", date: goalPayDate(g, m.ym, s), amount: m.pay, source: "goal", source_ref: goalRef(g, m.ym), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
-        }
-      }
-    }
-    // 臨時の返済は、残っている額までにする（「賞与から全額」など）
-    const sched = goalSchedule(g, s, months[0], months.length);
-    for (const m of sched) {
-      let room = m.lump;
-      for (const l of g.lumps.filter((x) => ymOf(x.date) === m.ym && (!g.as_of || x.date > g.as_of)).sort((a, b) => a.date.localeCompare(b.date))) {
-        const amount = Math.min(l.amount || Infinity, room);
-        room -= amount;
-        if (amount <= 0 || have.has(lumpRef(g, l.date))) continue;
-        accounts.push({ account: "bank", direction: "out", status: "plan", group: "other", category: null, name: `${g.name}（${l.memo || "臨時の返済"}）`, memo: "", date: l.date, amount, source: "goal", source_ref: lumpRef(g, l.date), recurring_id: null, goal_id: g.id, card: null, pair_id: null, locked: false });
-      }
-    }
-  }
-  return { accounts, cards };
-}
-
-/**
- * 目標から作った返済の予定（予定のまま・本人が直していないもの）の額を、目標マスタに合わせる。
- * 残高・毎月の額・臨時の返済を直したり、前の月の返済で残りが減ったりしたとき、出金予定の額も変わる。
- * 返す額がなくなった予定（残高が0になったあとの月など）は消す
- */
-export function syncGoalPlans(d: Data, months: string[]) {
-  const want = goalPlans(d, months, new Set(d.removedRefs ?? []));
-  const amount = new Map([...want.accounts, ...want.cards].map((e) => [e.source_ref, e.amount]));
-  const updates: { table: "account_entries" | "card_entries"; id: string; amount: number }[] = [];
-  const removes: { table: "account_entries" | "card_entries"; id: string }[] = [];
-  const check = (table: "account_entries" | "card_entries", e: AccountEntry | CardEntry) => {
-    if (e.source !== "goal" || e.status !== "plan" || e.locked || !e.source_ref) return;
-    // 毎月の返済は source_ref の月（goal:id:YYYY-MM）、臨時の返済はその日の月で、見ている月の中だけ
-    const ym = /:(\d{4}-\d{2})$/.exec(e.source_ref)?.[1] ?? ymOf(e.date);
-    if (!months.includes(ym)) return;
-    const a = amount.get(e.source_ref);
-    if (!a) removes.push({ table, id: e.id });
-    else if (a !== e.amount) updates.push({ table, id: e.id, amount: a });
-  };
-  for (const e of d.accounts) check("account_entries", e);
-  for (const e of d.cards) if (isLive(e)) check("card_entries", e);
-  return { updates, removes };
-}
-
-/**
- * 返済の目標の、その日の残高の見込み。入れた残高（as_of の日）から、その日までに来た毎月の返済と臨時の返済を引く。
- * 本当の残高が分かったら、目標の残高を直す
- */
-export function goalBalanceAt(g: Goal, s: Settings, date: string): number {
-  if (g.kind !== "repay") return g.balance;
-  let left = g.balance;
-  for (const m of goalSchedule(g, s, g.as_of ? ymOf(g.as_of) : ymOf(date), 240)) {
-    if (m.ym > ymOf(date)) break;
-    if (goalPayDate(g, m.ym, s) <= date) left -= m.pay;
-    left -= g.lumps.filter((l) => ymOf(l.date) === m.ym && l.date <= date).length ? m.lump : 0;
-  }
-  return Math.max(0, left);
-}
-
-export interface GoalOutlook { goal: Goal; months: GoalMonth[]; doneYm: string | null }
-
-/** 目標の見通し（§5.7）。返済は残高が0になる月、積立は目標額に届く月 */
-export function goalOutlook(d: Data, fromYm: string, n = 36): GoalOutlook[] {
-  return d.goals.filter((g) => g.active).map((g) => {
-    const months = goalSchedule(g, d.settings, fromYm, n);
-    const hit = months.find((m) => (g.kind === "repay" ? m.left <= 0 : !!g.target && m.left >= g.target));
-    return { goal: g, months, doneYm: g.kind === "repay" && g.balance <= 0 ? fromYm : hit?.ym ?? null };
-  });
-}
-
 // ---------- 予算（§5.1・§5.2） ----------
 
 /** その月の費目予算。その月になければ、いちばん近い前の月の予算を引き継ぐ */
@@ -283,10 +193,10 @@ export interface MonthBase {
   salary: number; // 給与
   extra: number; // 追加予算
   fixed: number; // 固定費（固定費の費目の予算の合計）
-  goal: number; // 目標用マイナス
-  goalAuto: number; // 目標マスタから出した目標用マイナス
-  goalManual: boolean; // 予算マスタで手で直したか
-  T: number; // 今月の予算 ＝ 給与 ＋ 追加予算 − 固定費 − 目標用マイナス
+  plan: number; // 計画の分（計画の支払い ＋ 予算から確保額に入れる分）
+  auto: number; // 目安 ＝ 給与 ＋ 追加予算 − 固定費 − 計画の分
+  manual: number | null; // その月に決めた予算（なければ null）
+  T: number; // 今月の予算 ＝ 決めた予算、なければ目安
 }
 
 /** その月の「予算の元」（§5.1） */
@@ -299,10 +209,10 @@ export function monthBase(d: Data, ym: string): MonthBase {
   }
   const budgets = budgetsFor(d, ym);
   const fixed = d.settings.fixCats.reduce((a, c) => a + (budgets.get(c) || 0), 0);
-  const goalAuto = goalMinusAuto(d, ym);
-  const hit = d.budgets.find((b) => b.month === ym && b.category === GOAL_KEY);
-  const goal = hit ? hit.amount : goalAuto;
-  return { salary, extra, fixed, goal, goalAuto, goalManual: !!hit, T: salary + extra - fixed - goal };
+  const plan = planMinus(d, ym);
+  const auto = salary + extra - fixed - plan;
+  const manual = d.months.find((m) => m.month === ym)?.budget ?? null;
+  return { salary, extra, fixed, plan, auto, manual, T: manual ?? auto };
 }
 
 /** 予算に数える出費の1件（クレカ明細か口座明細） */
@@ -437,7 +347,7 @@ export function accountFlow(d: Data, today: string, to?: string) {
 // ---------- 来月の支払い予定（§5.6） ----------
 
 export type PayGroup = "fixed" | "variable" | "installment" | "tatekae" | "other" | "diff";
-export const PAY_GROUP_LABEL: Record<PayGroup, string> = { fixed: "固定費", variable: "変動費", installment: "分割の返済", tatekae: "立替", other: "その他", diff: "クレカの確定の額との差" };
+export const PAY_GROUP_LABEL: Record<PayGroup, string> = { fixed: "固定費", variable: "変動費", installment: "計画の支払い", tatekae: "立替", other: "その他", diff: "クレカの確定の額との差" };
 
 /** 大費目の名前の初めの値（設定の「区分」で変えられる。計算は id で行うので、名前を変えても計算は変わらない） */
 export const GROUP_LABEL_DEFAULTS: Record<string, string> = {
@@ -451,7 +361,7 @@ export function applyLabels(s: Settings) {
   for (const k of Object.keys(ACCOUNT_GROUP_LABEL) as (keyof typeof ACCOUNT_GROUP_LABEL)[]) ACCOUNT_GROUP_LABEL[k] = l[k];
   for (const k of Object.keys(CARD_GROUP_LABEL) as (keyof typeof CARD_GROUP_LABEL)[]) CARD_GROUP_LABEL[k] = l[k];
   for (const k of ["fixed", "variable", "tatekae", "other"] as const) PAY_GROUP_LABEL[k] = l[k];
-  PAY_GROUP_LABEL.installment = s.labels?.installment ?? "分割の返済";
+  PAY_GROUP_LABEL.installment = "計画の支払い";
 }
 
 export interface PayItem {
@@ -484,7 +394,7 @@ export function nextPayments(d: Data, ym: string): { ym: string; groups: PayGrou
   }
   for (const e of d.accounts) {
     if (e.account !== "bank" || e.direction !== "out" || e.group === "card" || ymOf(e.date) !== ym) continue;
-    const g: PayGroup = e.group === "fixed" || e.group === "variable" || e.group === "tatekae" ? e.group : e.source === "goal" ? "installment" : "other";
+    const g: PayGroup = e.group === "fixed" || e.group === "variable" || e.group === "tatekae" ? e.group : e.source === "goal" || e.source === "plan" ? "installment" : "other";
     add(g, { date: e.date, name: e.name || e.category || "出金", from: "口座", amount: e.amount, plan: e.status === "plan", account: e });
   }
   const order: PayGroup[] = ["fixed", "variable", "installment", "tatekae", "other", "diff"];
@@ -495,56 +405,8 @@ export function nextPayments(d: Data, ym: string): { ym: string; groups: PayGrou
   return { ym, groups, total: groups.reduce((a, g) => a + g.amount, 0) };
 }
 
-// ---------- 計画をつくる（§5.7） ----------
-
-export interface PlanInput { from: string; monthly: number; useBonus: boolean; saved: number; target: number; months?: number }
-export interface PlanRow { ym: string; put: number; bonus: number; debtLeft: number; saved: number; free: number }
-export interface PlanResult { rows: PlanRow[]; payoffYm: string | null; reachYm: string | null; minFree: number }
-
-/** 返済・積立に回す賞与か（入金・その他のうち、名称に「賞与」とあるもの） */
+/** 賞与か（入金・その他のうち、名称に「賞与」とあるもの） */
 export const isBonus = (e: AccountEntry) => e.direction === "in" && e.group === "other" && /賞与|ボーナス/.test(e.name);
-
-/** 返済の目標の、その月の返済の予定の合計 */
-function repayDue(d: Data, ym: string): number {
-  return d.goals.filter((g) => g.active && g.kind === "repay").reduce((a, g) => a + (goalSchedule(g, d.settings, ym, 1)[0]?.pay ?? 0), 0);
-}
-
-/**
- * 毎月 monthly を回したときの見通し。リボが残っている間は max(monthly, その月の返済の予定)。賞与を回すなら、その月の賞与も足す。
- * 回した額はまずリボの残りに、なくなったら貯金に入れる。利息・手数料は入れない
- */
-export function planGoals(d: Data, p: PlanInput): PlanResult {
-  const n = p.months ?? 36;
-  const before = `${addMonths(p.from, -1)}-31`;
-  let debt = d.goals.filter((g) => g.active && g.kind === "repay").reduce((a, g) => a + goalBalanceAt(g, d.settings, before), 0);
-  let saved = p.saved;
-  const rows: PlanRow[] = [];
-  let payoffYm: string | null = debt <= 0 ? p.from : null, reachYm: string | null = null, minFree = Infinity;
-  for (let k = 0; k < n; k++) {
-    const ym = addMonths(p.from, k);
-    const b = monthBase(d, ym);
-    const bonus = p.useBonus ? d.accounts.filter((e) => isBonus(e) && ymOf(e.date) === ym).reduce((a, e) => a + e.amount, 0) : 0;
-    const put = debt > 0 ? Math.max(p.monthly, repayDue(d, ym)) : p.monthly;
-    let pool = put + bonus;
-    const toDebt = Math.min(debt, pool);
-    debt -= toDebt; pool -= toDebt; saved += pool;
-    const free = (b.salary || d.settings.salaryEstimate) + b.extra - b.fixed - put;
-    minFree = Math.min(minFree, free);
-    rows.push({ ym, put, bonus, debtLeft: debt, saved, free });
-    if (!payoffYm && debt <= 0) payoffYm = ym;
-    if (!reachYm && debt <= 0 && saved >= p.target) reachYm = ym;
-  }
-  return { rows, payoffYm, reachYm, minFree: minFree === Infinity ? 0 : minFree };
-}
-
-/** by の月までに目標に届く、いちばん少ない毎月の額（1,000円単位）。届かなければ null */
-export function monthlyFor(d: Data, p: Omit<PlanInput, "monthly">, by: string, max = 1_000_000): number | null {
-  const ok = (m: number) => { const r = planGoals(d, { ...p, monthly: m }); return !!r.reachYm && r.reachYm <= by; };
-  if (!ok(max)) return null;
-  let lo = 0, hi = max / 1000;
-  while (lo < hi) { const mid = Math.floor((lo + hi) / 2); if (ok(mid * 1000)) hi = mid; else lo = mid + 1; }
-  return lo * 1000;
-}
 
 /** 日付が過ぎたのに予定のままの手入力の予定（口座明細）。自動で作ったものは計上日に自動で確定する */
 export function overduePlans(d: Data, today: string): AccountEntry[] {

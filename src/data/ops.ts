@@ -1,10 +1,10 @@
-import { budgetsFor, groupOfCat, type AccountEntry, type CardEntry, type Goal, type Recurring } from "../engine";
+import { budgetsFor, groupOfCat, monthBase, type AccountEntry, type CardEntry, type Plan, type Recurring } from "../engine";
 import { backend, type Row } from "./backend";
 import { actions, type AppData } from "./store";
 
 // Claude と相談して決めた内容を取り込む JSON（format: gholdengo-ops-v1）。書き方は docs/OPS.md
 
-export type OpsTable = "budgets" | "goals" | "recurring" | "rules" | "account_entries" | "card_entries" | "balances" | "settings";
+export type OpsTable = "budgets" | "months" | "plans" | "recurring" | "rules" | "account_entries" | "card_entries" | "balances" | "settings";
 
 export interface Op {
   op: "set" | "delete";
@@ -27,7 +27,8 @@ export interface Change {
 /** 表ごとに、書いてよい列（ほかの列は無視せずエラーにする。user_id や deleted などを書かせないため） */
 const FIELDS: Record<OpsTable, string[]> = {
   budgets: ["amount"],
-  goals: ["kind", "name", "card", "balance", "as_of", "target", "monthly", "day", "start_month", "end_month", "lumps", "active", "sort"],
+  months: ["budget", "memo"],
+  plans: ["kind", "name", "use_date", "target", "done", "sort"],
   recurring: ["name", "kind", "group", "category", "amount", "day", "shift", "pay", "card", "shop", "every", "start_month", "end_month", "active"],
   rules: ["pattern", "category"],
   account_entries: ["account", "direction", "status", "group", "category", "name", "memo", "date", "amount"],
@@ -35,10 +36,10 @@ const FIELDS: Record<OpsTable, string[]> = {
   balances: ["date", "bank", "cash", "memo"],
   settings: ["safety", "payday", "salaryEstimate", "varCats", "fixCats", "dailyCats", "cards", "labels"],
 };
-const NAME: Record<OpsTable, string> = { budgets: "予算", goals: "目標", recurring: "定期", rules: "ルール", account_entries: "口座明細", card_entries: "クレカ明細", balances: "残高", settings: "設定" };
+const NAME: Record<OpsTable, string> = { budgets: "費目の予算", months: "月の予算", plans: "計画", recurring: "定期", rules: "ルール", account_entries: "口座明細", card_entries: "クレカ明細", balances: "残高", settings: "設定" };
 
 /** 金額の項目だけ ¥ をつける */
-const MONEY = ["amount", "balance", "target", "monthly", "bank", "cash", "safety", "salaryEstimate", "tatekae"];
+const MONEY = ["amount", "balance", "target", "monthly", "bank", "cash", "safety", "salaryEstimate", "tatekae", "budget"];
 const fmt = (v: unknown, k = "amount") => (typeof v === "number" ? (MONEY.includes(k) ? `¥${v.toLocaleString("ja-JP")}` : String(v)) : Array.isArray(v) || (v && typeof v === "object") ? JSON.stringify(v) : v == null ? "なし" : String(v));
 const diff = (before: Record<string, unknown>, data: Record<string, unknown>) =>
   Object.entries(data).filter(([k, v]) => JSON.stringify(before[k]) !== JSON.stringify(v)).map(([k, v]) => `${k}：${fmt(before[k], k)} → ${fmt(v, k)}`).join("、");
@@ -76,6 +77,15 @@ export function planOps(d: AppData, json: unknown): { note: string; changes: Cha
       changes.push({ label: `予算 ${month} ${category}：${now == null ? "なし" : fmt(now)} → ${fmt(data.amount)}`, kind: own ? "update" : "add", table: t, key: { month, category }, data });
       return;
     }
+    if (t === "months") {
+      const month = String(key.month ?? "");
+      if (!/^\d{4}-\d{2}$/.test(month)) { errors.push(`${at}：月の予算の key は { month: "YYYY-MM" }`); return; }
+      const b = monthBase(d, month);
+      if (o.op === "delete") { changes.push({ label: `${month} の予算を目安（${fmt(b.auto)}）に戻す`, kind: "delete", table: t, key: { month }, data: {} }); return; }
+      if (data.budget != null && typeof data.budget !== "number") { errors.push(`${at}：月の予算の data は { budget: 数 }（null で目安に戻す）`); return; }
+      changes.push({ label: `${month} の予算：${fmt(b.T)} → ${data.budget == null ? `目安 ${fmt(b.auto)}` : fmt(data.budget)}`, kind: b.manual == null ? "add" : "update", table: t, key: { month }, data });
+      return;
+    }
     if (t === "balances") {
       if (o.op === "delete") {
         const b = d.balances.find((x) => x.id === key.id);
@@ -90,12 +100,12 @@ export function planOps(d: AppData, json: unknown): { note: string; changes: Cha
 
     // ほかの表は、key に id か、名前（目標・定期）・pattern（ルール）・ref（明細の source_ref）で行を決める
     const rows: { id: string; label: string; row: Record<string, unknown> }[] =
-      t === "goals" ? d.goals.map((g) => ({ id: g.id, label: g.name, row: g as unknown as Record<string, unknown> }))
+      t === "plans" ? d.plans.map((g) => ({ id: g.id, label: g.name, row: g as unknown as Record<string, unknown> }))
         : t === "recurring" ? d.recurring.map((r) => ({ id: r.id, label: r.name, row: r as unknown as Record<string, unknown> }))
           : t === "rules" ? d.rules.map((r) => ({ id: r.id, label: r.pattern, row: r as unknown as Record<string, unknown> }))
             : t === "account_entries" ? d.accounts.map((e) => ({ id: e.id, label: `${e.date} ${e.name || e.category || ""}`, row: e as unknown as Record<string, unknown> }))
               : d.cards.map((e) => ({ id: e.id, label: `${e.date} ${e.name || e.shop || e.category || ""}`, row: e as unknown as Record<string, unknown> }));
-    const nameKey = t === "goals" || t === "recurring" ? "name" : t === "rules" ? "pattern" : "ref";
+    const nameKey = t === "plans" || t === "recurring" ? "name" : t === "rules" ? "pattern" : "ref";
     const rowKey = nameKey === "ref" ? "source_ref" : nameKey;
     if (key.id == null && key[nameKey] == null) { errors.push(`${at}：${NAME[t]}の key は { id } か { ${nameKey} }`); return; }
     const hits = rows.filter((r) => (key.id != null ? r.id === key.id : r.row[rowKey] === key[nameKey]));
@@ -108,7 +118,7 @@ export function planOps(d: AppData, json: unknown): { note: string; changes: Cha
     }
     if (hit) { changes.push({ label: `${NAME[t]}「${hit.label}」を直す（${diff(hit.row, data) || "変わらない"}）`, kind: "update", table: t, id: hit.id, key, data }); return; }
     if (key.id != null) { errors.push(`${at}：${NAME[t]}の id ${String(key.id)} はありません（足すときは id ではなく ${nameKey} で指定）`); return; }
-    const need: Record<string, string[]> = { goals: ["kind"], recurring: ["kind", "amount", "day"], rules: ["category"], account_entries: ["date", "amount", "direction", "group"], card_entries: ["date", "amount"] };
+    const need: Record<string, string[]> = { plans: ["kind"], recurring: ["kind", "amount", "day"], rules: ["category"], account_entries: ["date", "amount", "direction", "group"], card_entries: ["date", "amount"] };
     const miss = (need[t] ?? []).filter((k) => data[k] == null);
     if (miss.length) { errors.push(`${at}：${NAME[t]}を足すには ${miss.join("・")} が要ります`); return; }
     changes.push({ label: `${NAME[t]}「${String(key[nameKey])}」を足す（${Object.entries(data).map(([k, v]) => `${k}：${fmt(v, k)}`).join("、")}）`, kind: "add", table: t, key, data });
@@ -130,9 +140,13 @@ export async function applyOps(d: AppData, changes: Change[], today: string) {
         if (c.kind === "delete") await actions.deleteBalance(c.id!);
         else await backend.insert("balances", [{ date: data.date, bank: data.bank, cash: data.cash ?? 0, paypay: 0, memo: data.memo ?? "Claude との相談から" }]);
         break;
-      case "goals":
-        if (c.kind === "delete") await actions.deleteGoal(d, c.id!, today);
-        else await actions.saveGoal(d, { ...(c.kind === "add" ? { name: String(c.key!.name), lumps: [], active: true } : {}), ...(data as Partial<Goal>), ...(c.id ? { id: c.id } : {}) }, today);
+      case "months":
+        await actions.saveMonthBudget(String(c.key!.month), c.kind === "delete" || data.budget == null ? null : Number(data.budget));
+        break;
+      case "plans":
+        if (c.kind === "delete") await actions.deletePlan(d, c.id!);
+        else if (c.id) await actions.updatePlan(c.id, data as Partial<Plan>);
+        else await backend.insert("plans", [{ name: String(c.key!.name), target: 0, done: false, sort: d.plans.length, ...data }]);
         break;
       case "recurring":
         if (c.kind === "delete") await actions.deleteRecurring(d, c.id!, today);
