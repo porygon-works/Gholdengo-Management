@@ -12,6 +12,7 @@ export const KindChip = ({ k }: { k: PlanKind }) => <span className="chip kind" 
 /** 計画のそろい具合の表示 */
 export function statusText(d: AppData, p: Plan, f: Forecast | null) {
   const st = planStatus(d, p, f);
+  if (!p.use_date && p.kind === "repay") return { st, got: 0, sub: "まとめて返す日なし", cls: "" };
   if (!p.use_date) return { st, got: st.got, sub: f ? `${md(f.end)}まで` : "", cls: "" };
   if (st.short <= 0) return { st, got: st.need, sub: "そろう", cls: "pos" };
   return { st, got: st.got, sub: st.ok ? `残り ${yen(st.short)} は予備から` : `${yen(st.short - Math.max(0, st.spare))} 足りない`, cls: st.ok ? "" : "neg" };
@@ -144,6 +145,13 @@ function PlanSheet({ store, data, plan: p, f, today, onClose }: { store: Store; 
         : { source, name: "予備から", date: today, budget_month: null, amount: 0 };
     return run(() => actions.addFund(p, x));
   };
+  /** 終わった計画にする。明日より先の予定の取引は消す（もう払わない） */
+  const finish = async () => {
+    if (p.done) { await run(() => actions.updatePlan(p.id, { done: false }), "計画を戻しました"); return; }
+    const later = data.accounts.filter((e) => e.plan_id === p.id && e.status === "plan" && e.date > today);
+    if (later.length && !confirm(`この先の予定の取引 ${later.length}件 を消して、終わった計画にしますか？`)) return;
+    await run(async () => { for (const e of later) await actions.deletePlanEntry(e.id); await actions.updatePlan(p.id, { done: true }); }, "終わった計画にしました");
+  };
   const remove = async () => {
     if (!confirm(`計画「${p.name}」を消しますか？（予定の取引も消えます。確定した取引は残ります）`)) return;
     await run(() => actions.deletePlan(data, p.id), "計画を消しました");
@@ -246,7 +254,7 @@ function PlanSheet({ store, data, plan: p, f, today, onClose }: { store: Store; 
       <div className="note">支払いは口座から出るお金（その月の予算から引きます）。確保額へ入れる分は口座に残しておくお金で、使う日にまとめて使います。</div>
       <div className="btns end">
         <button className="btn danger sm" onClick={remove}>計画を消す</button>
-        <button className="btn ghost sm" onClick={() => run(() => actions.updatePlan(p.id, { done: !p.done }), p.done ? "計画を戻しました" : "終わった計画にしました")}>{p.done ? "終わったのを戻す" : "終わった"}</button>
+        <button className="btn ghost sm" onClick={finish}>{p.done ? "終わったのを戻す" : "終わった"}</button>
         <button className="btn" onClick={onClose}>閉じる</button>
       </div>
     </Sheet>
