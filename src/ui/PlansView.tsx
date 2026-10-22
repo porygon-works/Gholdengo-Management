@@ -12,7 +12,7 @@ export const KindChip = ({ k }: { k: PlanKind }) => <span className="chip kind" 
 /** 計画のそろい具合の表示 */
 export function statusText(d: AppData, p: Plan, f: Forecast | null) {
   const st = planStatus(d, p, f);
-  if (!p.use_date && p.kind === "repay") return { st, got: 0, sub: "まとめて返す日なし", cls: "" };
+  if (!p.use_date && p.kind === "repay") return { st: { ...st, need: planDebts(d, p).reduce((a, x) => a + x.balance, 0) }, got: 0, sub: "日付なし", cls: "" };
   if (!p.use_date) return { st, got: st.got, sub: f ? `${md(f.end)}まで` : "", cls: "" };
   if (st.short <= 0) return { st, got: st.need, sub: "そろう", cls: "pos" };
   return { st, got: st.got, sub: st.ok ? `残り ${yen(st.short)} は予備から` : `${yen(st.short - Math.max(0, st.spare))} 足りない`, cls: st.ok ? "" : "neg" };
