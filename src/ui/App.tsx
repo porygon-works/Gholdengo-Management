@@ -58,8 +58,13 @@ function Main() {
   useEffect(() => { try { localStorage.setItem("gholdengo.screen", screen); } catch { /* なし */ } }, [screen]);
   const go = (s: Screen) => { setScreen(s); setMenu(false); window.scrollTo(0, 0); };
   const reviews = data ? reviewCount(data, today) : 0;
-  const openEntry = (o: Open) => setSheet(o);
   const openPlan = (id: string) => { setPlanId(id); go("plans"); };
+  // 計画の取引は、明細から開いても計画の中身で直す（額や確定は計画で決めるため）
+  const openEntry = (o: Open) => {
+    const pid = o.type === "account" ? o.entry?.plan_id : null;
+    if (pid && data?.plans.some((p) => p.id === pid)) openPlan(pid);
+    else setSheet(o);
+  };
   const openRow = openRowOf(openEntry, openPlan);
 
   const sub = loading && !data ? "読み込み中…" : error ? "保存か読み込みに失敗しました" : backend.mode === "local" ? "お試しモード（この端末だけに保存）" : `今日 ${+today.slice(5, 7)}/${+today.slice(8)}`;
