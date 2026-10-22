@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { computeMonth, isLive, ymOf, type AccountEntry, type CardEntry, type Spend } from "../engine";
 import type { AppData } from "../data/store";
-import { ACCOUNT_GROUP_LABEL, accountTitle, Bar, CARD_GROUP_LABEL, cardTitle, Empty, md, money, ownCost, signed, StatusChip, wday, yen } from "./common";
+import { ACCOUNT_GROUP_LABEL, accountTitle, Bar, CARD_GROUP_LABEL, cardTitle, Chip, Empty, md, money, ownCost, signed, StatusChip, wday, yen } from "./common";
 import type { Open } from "./Sheets";
 
 type OnOpen = (o: Open) => void;
@@ -76,19 +76,12 @@ export function Ledger({ data, month, today, focusCat, onOpen, onAdd }: { data: 
   const catPanel = (c: (typeof v.cats)[number]) => {
     const isOpen = open === c.cat;
     const st = c.rem < 0 ? "bad" : c.budget && c.rem < c.budget * 0.15 ? "warn" : "ok";
-    // 固定費は、見込みのうちまだ使っていない額（ダッシュボードの「これから」と同じ）
-    const left = c.rem < 0 ? -c.rem : c.fixed ? Math.max(0, c.budget - c.used) : c.rem;
     return (
       <div className="panel" key={c.cat} id={`cat-${c.cat}`}>
         <button className="cathead" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : c.cat)}>
-          <span className="n">{c.cat}</span>
-          <span className={`rem num ${st}`}><small>{c.rem < 0 ? "超過" : c.fixed ? "これから" : "残り"}</small>{money(left)}</span>
+          <span className="n">{c.cat} <Chip kind={st}>{c.rem < 0 ? `超過 ${yen(-c.rem)}` : `残り ${yen(c.rem)}`}</Chip></span>
+          <span className="s num">使った {money(c.used)}{c.planned ? `・予定 ${money(c.planned)}` : ""} / 予算 {money(c.budget)}</span>
         </button>
-        <div className="catnums num">
-          <span>{c.fixed ? "見込み" : "予算"} {money(c.budget)}</span>
-          <span>使った {money(c.used)}</span>
-          {c.planned ? <span>予定 {money(c.planned)}</span> : null}
-        </div>
         <Bar budget={c.budget} used={c.used} planned={c.planned} />
         {isOpen ? (
           c.items.length || c.plans.length
