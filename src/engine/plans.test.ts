@@ -95,3 +95,37 @@ describe("口座の見通し", () => {
     expect([st.need, st.got, st.short, st.ok]).toEqual([60000, 0, 60000, true]);
   });
 });
+
+describe("計画の計算（見直し）", () => {
+  const base = { balances: [{ id: "b", date: "2026-11-01", bank: 100000, cash: 0, paypay: 0, memo: "" }], months: [{ month: "2026-11", budget: 0, memo: "" }, { month: "2026-12", budget: 0, memo: "" }] };
+  it("買い物：使う日の前までに入れた分がそろえば、足りない額は0。まとめて払う行の額は金額", () => {
+    const buy = P({ id: "b1", kind: "buy", target: 60000, use_date: "2026-12-20" });
+    const d = D({ ...base, plans: [buy], funds: [F({ plan_id: "b1", source: "spare", date: "2026-11-10", amount: 60000 })] });
+    const f = forecast(d, "2026-11-10", 2)!;
+    const st = planStatus(d, buy, f);
+    expect([st.need, st.got, st.short, st.ok]).toEqual([60000, 60000, 0, true]);
+    expect(syncLumps(d).inserts.map((e) => [e.date, e.amount])).toEqual([["2026-12-20", 60000]]);
+  });
+  it("確保額の内訳：計画ごとの分と、予備 ＝ 口座残高 − 計画の分", () => {
+    const buy = P({ id: "b1", kind: "buy", target: 60000, use_date: "2026-12-20" });
+    const save = P({ id: "s1", kind: "save", target: 30000, use_date: null });
+    const d = D({ ...base, plans: [buy, save], funds: [F({ plan_id: "b1", source: "spare", date: "2026-11-10", amount: 40000 }), F({ plan_id: "s1", source: "spare", date: "2026-11-10", amount: 50000 })] });
+    const f = forecast(d, "2026-11-10", 2)!;
+    const r = reserveAt(d, f, "2026-11-15")!;
+    expect([r.total, r.byKind.buy, r.byKind.save, r.spare]).toEqual([100000, 40000, 30000, 30000]);
+    // 使う日のあとは計画の分が0になる
+    expect(reserveAt(d, f, "2026-12-20")!.byKind.buy).toBe(0);
+  });
+  it("終わった計画の「予算から」は、予算から引かない（支払いは引く）", () => {
+    const p = P({ id: "p1", done: true });
+    const d = D({ plans: [p], funds: [F({ source: "budget", budget_month: "2026-11", amount: 5000 })], accounts: [A({ plan_id: "p1", plan_role: "pay", budget_month: "2026-11", amount: 7000 })] });
+    expect(planMinusItems(d, "2026-11").map((x) => x.amount)).toEqual([7000]);
+  });
+  it("実質残高：先の月にカードで使う見込みは、月の中で日割りで増える", () => {
+    const d = D({ ...base, months: [{ month: "2026-11", budget: 0, memo: "" }, { month: "2026-12", budget: 31000, memo: "" }] });
+    const f = forecast(d, "2026-11-10", 2)!;
+    const at = (t: string) => f.days.find((x) => x.date === t)!;
+    expect([at("2026-11-30").real, at("2026-12-10").real, at("2026-12-31").real]).toEqual([100000, 90000, 69000]);
+    expect(at("2026-12-31").bank).toBe(100000);
+  });
+});
