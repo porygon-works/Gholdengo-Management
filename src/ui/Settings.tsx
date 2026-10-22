@@ -50,7 +50,7 @@ export function SettingsView({ store, data, month, onOpen }: { store: Store; dat
 
 // ---------- 予算 ----------
 
-/** 予算の元（給与・追加予算・前月からの繰越・固定費・目標用マイナス）と、そこから決めるその月の予算。目標用マイナスは、この月だけ手で直せる */
+/** 予算の元（給与・追加予算・固定費・目標用マイナス）。目標用マイナスだけ、この月だけ手で直せる */
 function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; month: string }) {
   const b = monthBase(data, month);
   const [edit, setEdit] = useState(false);
@@ -70,7 +70,6 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
       <div className="panel">
         {line("給与", b.salary, "その月の口座明細の入金のうち、大費目が給与のもの（予定を含む）。直すときは明細や予定を直す")}
         {line("＋ 追加予算", b.extra, "その月の口座明細の入金のうち、大費目が追加予算のもの（イベチケなど）")}
-        {b.carryInfo && <CarryLine data={data} month={month} />}
         {line("− 固定費", b.fixed, "固定費の費目の予算（見込み）の合計。下の「固定費」で直す")}
         <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
           <div className="legend" style={{ justifyContent: "space-between" }}>
@@ -91,84 +90,7 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
             </div>
           )}
         </div>
-        {b.input ? <MonthBudget store={store} data={data} month={month} />
-          : <div className="legend" style={{ justifyContent: "space-between" }}><b style={{ color: "var(--ink)" }}>＝ {ymLabel(month)}の予算</b><b className="num">{signed(b.T)}円</b></div>}
-      </div>
-    </section>
-  );
-}
-
-/** 前月からの繰越（§5.8）の内訳 */
-function CarryLine({ data, month }: { data: AppData; month: string }) {
-  const c = monthBase(data, month).carryInfo!;
-  const row = (label: string, v: number) => <tr><td>{label}</td><td className="num">{money(v)}</td></tr>;
-  const first = month === c.baseYm;
-  return (
-    <div style={{ display: "grid", gap: 4, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
-      <div className="legend" style={{ justifyContent: "space-between" }}>
-        <b style={{ color: "var(--ink)" }}>{c.raw < 0 ? "− 前月からの繰越（前の月に予算より多く出た分）" : "＋ 前月からの繰越"}</b>
-        <b className={`num ${c.raw < 0 ? "neg" : ""}`}>{signed(c.raw)}円</b>
-      </div>
-      <table className="tbl">
-        <tbody>
-          {row(`${md(c.end)}の口座（見込み）`, c.bank)}
-          {row("− まだ引き落とされていないクレカ（前の月までに使った分）", c.owed)}
-          {c.saved !== 0 && row("− 積立にたまった額（口座に置いたまま）", c.saved)}
-          {c.safety !== 0 && row("− 安全残高", c.safety)}
-          {c.receivable !== 0 && row("＋ まだ返ってきていない立替", c.receivable)}
-          <tr><td>＝ 前の月の終わりの残り</td><td className="num">{signed(c.left)}</td></tr>
-          {row(`− いつもの残り（始めた ${ymLabel(c.baseYm)} の初めの残り）`, c.base)}
-        </tbody>
-        <tfoot><tr><td>＝ 繰越</td><td className="num">{signed(c.raw)}</td></tr></tfoot>
-      </table>
-      <div className="note">{first
-        ? `${ymLabel(c.baseYm)}から繰越を始めたので、この月の初めの残りを「いつもの残り」として、繰越は0です（前の月のクレカをこの月の給与で払う、いつものずれは数えません）。`
-        : "いつもの残りより増えた分（前の月に予算にしなかった分・使い残した分）を足し、減った分（予算より多く出た分）を引きます。"}</div>
-    </div>
-  );
-}
-
-/** その月の予算を、使えるお金から決める */
-function MonthBudget({ store, data, month }: { store: Store; data: AppData; month: string }) {
-  const b = monthBase(data, month);
-  const [val, setVal] = useState<number | "">(b.T);
-  useEffect(() => setVal(b.T), [month, b.T]);
-  const save = async (amount: number | null) => {
-    if (await store.run(() => actions.saveMonthBudget(month, amount))) toast(amount == null ? `初めの値（${yen(data.settings.budgetDefault)}円）に戻しました` : `${ymLabel(month)}の予算を決めました`);
-  };
-  const rest = b.available - b.T;
-  return (
-    <div style={{ display: "grid", gap: 6 }}>
-      <div className="legend" style={{ justifyContent: "space-between" }}><b style={{ color: "var(--ink)" }}>＝ 使えるお金</b><b className={`num ${b.available < 0 ? "neg" : ""}`}>{signed(b.available)}円</b></div>
-      <div className="panel" style={{ background: "var(--accent-soft)", border: 0 }}>
-        <Field label={`${ymLabel(month)}の予算（使えるお金のうち、いくら使うか）`} hint={b.budgetManual ? "この月に決めた額" : `決めていないので初めの値（${yen(data.settings.budgetDefault)}円）`}>
-          <NumInput value={val} onChange={setVal} />
-        </Field>
-        <div className="btns">
-          <button className="btn sm" onClick={() => save(val === "" ? 0 : val)}>この額にする</button>
-          {b.available > 0 && <button className="btn sm ghost" onClick={() => save(b.available)}>使えるお金を全部</button>}
-          {b.budgetManual && <button className="btn sm ghost" onClick={() => save(null)}>初めの値に戻す</button>}
-        </div>
-        <div className={rest < 0 ? "alert" : "note"}>{rest < 0 ? `使えるお金を ${yen(-rest)}円 こえています。` : `予算にしない ${yen(rest)}円 は口座に残り、来月の繰越に入ります。`}</div>
-      </div>
-    </div>
-  );
-}
-
-/** 予算の決め方（始める月・初めの値） */
-function CarrySettings({ store, data }: { store: Store; data: AppData }) {
-  const [s, setS] = useState<S>(data.settings);
-  useEffect(() => setS(data.settings), [data.settings]);
-  const save = async () => { if (await store.run(() => actions.saveSettings(s))) toast("保存しました"); };
-  return (
-    <section>
-      <h2>予算の決め方</h2>
-      <div className="panel">
-        <div className="grid2">
-          <Field label="繰越を入れ、予算を自分で決めはじめる月" hint="空なら繰越を入れず、使えるお金をそのまま予算にする"><input type="month" value={s.carryFrom ?? ""} onChange={(e) => setS({ ...s, carryFrom: e.target.value || null })} /></Field>
-          <Field label="予算の初めの値" hint="月ごとに決めていないときの予算"><NumInput value={s.budgetDefault} onChange={(v) => setS({ ...s, budgetDefault: v === "" ? 0 : v })} /></Field>
-        </div>
-        <div className="btns"><button className="btn" onClick={save}>保存</button></div>
+        <div className="legend" style={{ justifyContent: "space-between" }}><b style={{ color: "var(--ink)" }}>＝ {ymLabel(month)}の予算</b><b className="num">{signed(b.T)}円</b></div>
       </div>
     </section>
   );
@@ -185,8 +107,7 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   const sumOf = (cs: string[]) => cs.reduce((a, c) => a + (Number(vals[c]) || 0), 0);
   // 入力中の値で、予算と予備を出し直す（固定費を直すと、今月の予算も変わる）
   const fixedSum = sumOf(st.fixCats);
-  // 予算を自分で決める月は、決めた予算を割り振る。それより前の月は、使えるお金（入力中の固定費で出し直す）
-  const free = v.base.input ? v.base.T : v.base.salary + v.base.extra + v.base.carry - fixedSum - v.base.goal;
+  const free = v.base.salary + v.base.extra - fixedSum - v.base.goal;
   const reserve = free - sumOf(st.varCats);
   const own = data.budgets.some((b) => b.month === month && !b.category.startsWith("#") && b.category !== RESERVE);
   const save = async () => {
@@ -203,11 +124,10 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   return (
     <>
       <MonthBaseEditor store={store} data={data} month={month} />
-      <CarrySettings store={store} data={data} />
       <section>
         <h2>費目ごとの予算 <small>{own ? "この月の予算" : "前の月から引き継いでいます"}</small></h2>
         <div className="panel">
-          <h2>固定費 <small>合計 {yen(fixedSum)}円（{v.base.input ? "使えるお金" : "給与"}から引く）</small></h2>
+          <h2>固定費 <small>合計 {yen(fixedSum)}円（給与から引く）</small></h2>
           <div className="budgetgrid">{grid(st.fixCats)}</div>
           <div className="note">毎月の見込みの額。予算を入れていない費目は、定期マスタの額を使います。見込みをこえた分は残り予算から引きます。</div>
           <h2 style={{ marginTop: 8 }}>変動費 <small>今月の予算 {signed(free)}円 を割り振る</small></h2>

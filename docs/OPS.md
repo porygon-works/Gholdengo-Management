@@ -15,7 +15,7 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
 | 項目 | 中身 |
 | --- | --- |
 | `summary` | アプリが計算したまとめ。**数を答えるときはこれを使う**（自分で計算し直さない） |
-| `summary.thisMonth` | 今月の予算（`budget`）・残り予算（`remaining`）・予算の元（`base`：給与・追加予算・前月からの繰越・固定費・目標用マイナス・使えるお金 `available`・予算を決めたか `budgetDecided`）・繰越の内訳（`carry`：その月の初めの残り `left`・まだ返ってきていない立替 `receivable`・いつもの残り `base`・繰越 `raw`）・費目ごと（`categories`：予算・使った・予定・残り） |
+| `summary.thisMonth` | 今月の予算（`budget`）・残り予算（`remaining`）・予算の元（`base`：給与・追加予算・固定費・目標用マイナス）・費目ごと（`categories`：予算・使った・予定・残り） |
 | `summary.account` | いまの口座残高（`bankNow`）・財布（`walletNow`）・次の給料日（`nextPayday`）・給料日の前日に残る額（`leftBeforePayday`）・それまでの口座の動き（`flow`） |
 | `summary.nextMonthPayments` | 来月に口座から出るお金（大費目ごと・明細つき） |
 | `summary.nextMonthBudget` | 来月の予算と予算の元 |
@@ -34,7 +34,6 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
   "ops": [
     { "op": "set", "table": "budgets", "key": { "month": "2026-12", "category": "食料品" }, "data": { "amount": 18000 } },
     { "op": "set", "table": "budgets", "key": { "month": "2026-12", "category": "#目標用マイナス" }, "data": { "amount": 30000 } },
-    { "op": "set", "table": "budgets", "key": { "month": "2026-12", "category": "#予算" }, "data": { "amount": 100000 } },
     { "op": "set", "table": "goals", "key": { "name": "サンプルのリボ" }, "data": { "monthly": 12000, "lumps": [{ "date": "2026-12-15", "amount": 0, "memo": "賞与から全額" }] } },
     { "op": "set", "table": "recurring", "key": { "name": "年払いのサービス" }, "data": { "kind": "expense", "group": "fixed", "category": "サブスク", "amount": 2400, "day": 10, "pay": "card", "every": 12, "start_month": "2026-12" } },
     { "op": "delete", "table": "recurring", "key": { "name": "やめたサブスク" } },
@@ -59,9 +58,9 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
 | `account_entries` | `ref` か `id` | `account`（bank／wallet）・`direction`（in／out）・`status`（plan／confirmed）・`group`・`category`・`name`・`memo`・`date`・`amount` | `date`・`amount`・`direction`・`group` |
 | `card_entries` | `ref` か `id` | `card`・`status`・`date`・`amount`・`group`・`category`・`name`・`shop`・`memo`・`tatekae` | `date`・`amount` |
 | `balances` | （消すときだけ `id`） | `date`・`bank`・`cash`・`memo` | `date`・`bank` |
-| `settings` | なし | `safety`・`payday`・`salaryEstimate`・`varCats`・`fixCats`・`dailyCats`・`cards`・`labels`・`carryFrom`・`budgetDefault` | — |
+| `settings` | なし | `safety`・`payday`・`salaryEstimate`・`varCats`・`fixCats`・`dailyCats`・`cards`・`labels` | — |
 
-- `budgets` の `category` に `#目標用マイナス` を入れると、その月の目標用マイナスを手で直した値になる（消すと目標マスタから出す値に戻る）。`#予算` なら、その月の予算（使えるお金のうち使う額）になる（消すと設定の `budgetDefault` に戻る）。
+- `budgets` の `category` に `#目標用マイナス` を入れると、その月の目標用マイナスを手で直した値になる（消すと目標マスタから出す値に戻る）。
 - 明細を Claude から足すときは、`ref` に `claude:` で始まる、ほかと重ならない名前をつける。あとで同じ `ref` で直す・消すができる。`status` を書かなければ予定になる。
 - 明細の `group`（大費目）を書かず `category` を書けば、費目から変動費か固定費かを決める。
 - 大費目の id：口座明細の出金は `variable`・`fixed`・`tatekae`・`other`（`card` はクレカの請求なので Claude からは使わない）、入金は `salary`・`extra`・`refund`・`other`。クレカ明細は `variable`・`fixed`・`tatekae`・`installment`（分割の返済）・`purchase`（分割で買った物）。

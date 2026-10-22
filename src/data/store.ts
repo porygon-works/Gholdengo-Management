@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, applyLabels, syncGoalPlans, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, BUDGET_KEY, todayJST, ymOf,
+  addMonths, applyLabels, syncGoalPlans, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, GOAL_KEY, groupOfCat, missingGoalPlans, missingRecurring, RESERVE, ruleFor, syncBills, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type Goal, type Recurring, type Rule, type Settings,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
@@ -159,26 +159,10 @@ async function migrate6(raw: Raw, d: AppData): Promise<boolean> {
   return true;
 }
 
-/**
- * 版7まで → 版8：来月から、前月からの繰越（§5.8）を入れ、予算を使えるお金から決める（§5.1）。
- * 来月の初めの残りを「いつもの残り」とする（今月より前は、前の家計簿から移した明細がそろっていないため）。
- * 始める月のない積立は来月からにする（たまった額を月ごとに数え、繰越から引くため）。版7の繰越の上限・回す積立の設定は消す
- */
-async function migrate8(raw: Raw, d: AppData, today: string): Promise<boolean> {
-  const saved = raw.settings[0]?.data as Partial<Settings> | undefined;
-  if (!saved || (saved.version ?? 1) >= 8) return false;
-  const next = addMonths(ymOf(today), 1);
-  for (const g of d.goals) if (g.kind === "save" && !g.start_month) await backend.update("goals", g.id, { start_month: next });
-  const { carryCap: _a, carryGoal: _b, ...rest } = d.settings as Settings & { carryCap?: number; carryGoal?: string };
-  await backend.upsertKeyed("settings", [{ data: { ...rest, version: 8, carryFrom: next } }]);
-  return true;
-}
-
 async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (!raw.settings.length) { await backend.upsertKeyed("settings", [{ data: DEFAULT_SETTINGS }]); return true; }
   if (await migrate4(raw, d)) return true;
   if (await migrate6(raw, d)) return true;
-  if (await migrate8(raw, d, today)) return true;
   if (await copyV2(raw, d)) return true;
   let wrote = false;
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }
@@ -401,9 +385,6 @@ export const actions = {
   /** その月の目標用マイナスを手で直す。null なら目標マスタから出す値に戻す */
   saveGoalMinus: (month: string, amount: number | null) =>
     amount == null ? backend.removeBudget(month, GOAL_KEY) : backend.upsertKeyed("budgets", [{ month, category: GOAL_KEY, amount }]),
-  /** その月の予算（使えるお金のうち予算にする額）を決める。null なら設定の初めの値に戻す */
-  saveMonthBudget: (month: string, amount: number | null) =>
-    amount == null ? backend.removeBudget(month, BUDGET_KEY) : backend.upsertKeyed("budgets", [{ month, category: BUDGET_KEY, amount }]),
 
   saveSettings: (s: Settings) => backend.upsertKeyed("settings", [{ data: s }]),
 

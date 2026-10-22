@@ -211,21 +211,13 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
             <tbody>
               <tr><td>給与</td><td className="num">{money(b.salary)}</td></tr>
               {b.extra !== 0 && <tr><td>＋ 追加予算（イベチケなど）</td><td className="num">{money(b.extra)}</td></tr>}
-              {b.carryInfo && <tr><td>{b.carry < 0 ? "− 前月からの繰越（前の月に予算より多く出た分）" : "＋ 前月からの繰越"}</td><td className="num">{money(Math.abs(b.carry))}</td></tr>}
               <tr><td>− 固定費（家賃・奨学金・通信・サブスクなど）</td><td className="num">{money(b.fixed)}</td></tr>
               <tr><td>− 目標用マイナス（リボの返済・積立）{b.goalManual && <span className="note">（この月だけ直した額）</span>}</td><td className="num">{money(b.goal)}</td></tr>
               {v.fixedOver > 0 && <tr><td>（固定費が見込みをこえた分 {yen(v.fixedOver)}円 は、残り予算から引いています）</td><td /></tr>}
             </tbody>
-            {b.input ? (
-              <tfoot>
-                <tr><td>＝ 使えるお金</td><td className="num">{money(b.available)}</td></tr>
-                <tr><td>そのうち{label}{!b.budgetManual && <span className="note">（決めていないので初めの値）</span>}</td><td className="num">{money(b.T)}</td></tr>
-                <tr><td>{b.available - b.T < 0 ? "使えるお金をこえた分" : "予算にしない分（口座に残り、来月の繰越に入る）"}</td><td className={`num ${b.available - b.T < 0 ? "neg" : ""}`}>{money(b.available - b.T)}</td></tr>
-              </tfoot>
-            ) : <tfoot><tr><td>＝ {label}</td><td className="num">{money(b.T)}</td></tr></tfoot>}
+            <tfoot><tr><td>＝ {label}</td><td className="num">{money(b.T)}</td></tr></tfoot>
           </table>
         </button>
-        {b.input && b.T > b.available && <div className="alert">{label}が、使えるお金を {yen(b.T - b.available)}円 こえています。「設定」の予算で見直してください。</div>}
         {v.overAllocated && <div className="alert">費目の予算の合計が、今月の予算を {yen(-v.reserveBudget)}円 こえています。「設定」の予算を見直してください。</div>}
       </section>
 
@@ -267,7 +259,7 @@ export function Dashboard({ store, data, month, today, reviews, go, open, onOpen
       </section>
 
       <section>
-        <h2>{ACCOUNT_GROUP_LABEL.fixed} <small>見込みを{b.input ? "使えるお金" : "給与"}から引いてある・タップで明細</small></h2>
+        <h2>{ACCOUNT_GROUP_LABEL.fixed} <small>見込みを給与から引いてある・タップで明細</small></h2>
         <div className="panel scroll">
           <table className="tbl wide">
             <thead><tr><th>費目</th><th>見込み</th><th>使った</th><th>予定</th><th>これから</th></tr></thead>
