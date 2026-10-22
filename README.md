@@ -1,12 +1,12 @@
 # Gholdengo 家計簿
 
 前の家計簿アーティファクトを置き換える、家計簿の Web アプリ（PWA）。
-給与から固定費と目標用マイナス（リボの返済・積立）を引いた「今月の予算」を出し、口座明細とクレカ明細でお金の動きを管理する。三井住友カードの通知メールは GAS で自動で取り込む。
+給与から固定費と計画の分（リボの支払い・積立）を引いた目安から「今月の予算」を決め、口座明細とクレカ明細でお金の動きを管理する。口座の見通し（線グラフ）と、返済・買い物・貯蓄の計画で、口座に残しておくお金（確保額）を見える形にする。三井住友カードの通知メールは GAS で自動で取り込む。
 
 - 仕様：[docs/SPEC.md](docs/SPEC.md)
 - 計算エンジン：`src/engine/`（画面と分けた関数。`npm test` でテスト）
 - 画面：`src/ui/`
-- DB：`supabase/migrations/`（v3 の表は `0004_v3_tables.sql`：口座明細 `account_entries`・クレカ明細 `card_entries`・目標マスタ `goals`）
+- DB：`supabase/migrations/`（v3 の表は `0004_v3_tables.sql`：口座明細 `account_entries`・クレカ明細 `card_entries`。v4 の計画と月の予算は `0007_plans_months.sql`：`plans`・`plan_debts`・`plan_funds`・`months`）
 - メールの取り込み：`gas/Code.gs`
 
 ```
@@ -20,7 +20,7 @@ Gmail ──(15分ごと)── GAS ──→ Supabase ←──→ Webアプリ
 Supabase はプロジェクト **porygon-works** に複数のアプリの DB をまとめている。新しいプロジェクトは作らず、この家計簿の表は **`ggmg` スキーマ** に置く。
 
 1. <https://supabase.com> で **porygon-works** プロジェクトを開く。
-2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` → `0005_deleted_every.sql` → `0006_snapshots.sql` …）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
+2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` → `0005_deleted_every.sql` → `0006_snapshots.sql` → `0007_plans_months.sql`）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
 3. **Project Settings → Data API → Exposed schemas** に **`ggmg`** を足して **Save**（これをしないとアプリと GAS から表が見えない）。
 4. **Authentication → Users → Add user → Create new user** で、自分のメールとパスワードを入れて作る（Auto Confirm User にチェック。ほかのアプリで作ったユーザーがあればそれを使ってよい）。
 5. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ** にする（自分以外がユーザーを作れないように。ほかのアプリで新規登録を使っているなら、そちらに合わせる）。
@@ -68,8 +68,14 @@ Supabase はプロジェクト **porygon-works** に複数のアプリの DB を
 1. Supabase の SQL Editor で `supabase/migrations/0004_v3_tables.sql` を貼って **Run**。
 2. アプリを開く（新しい版になったら）。前の版の明細・請求額・借金・毎月の貯金が、口座明細・クレカ明細・目標マスタへ自動で写る。
 3. GAS のエディタで `コード.gs` を、新しい `gas/Code.gs` の中身に貼り替えて保存（トリガーはそのままでよい）。貼り替えるまでは前の表に書くが、アプリが開いたときに写すので消えない。
-4. 設定 → **目標** で、返済の目標（毎月の額・臨時の返済）と積立の目標を確かめる。
-5. メニュー → **口座と財布** で、口座と財布の本当の残高を入れて直す。
+4. メニュー → **口座と財布** で、口座と財布の本当の残高を入れて直す。
+
+## v3 から v4 にするとき（1回だけ）
+
+1. Supabase の SQL Editor で `supabase/migrations/0007_plans_months.sql` を貼って **Run**（計画・月の予算の表と、口座明細の計画の列ができる）。
+2. アプリを開く。動いている目標マスタ（返済・積立）が、計画へ自動で写る（臨時の返済の日が同じ返済の目標は1つの計画にまとまる）。
+3. **計画** の画面で、残高（カードのサイトで見た額）・毎月の支払い・まとめて返す日・賞与から入れる額を確かめて直す。
+4. 設定 → **予算** で、その月の予算を決める（空なら目安のまま）。
 
 ## Claude が読めるようにする（Google ドライブ）
 

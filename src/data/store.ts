@@ -176,9 +176,10 @@ async function migrate6(raw: Raw, d: AppData): Promise<boolean> {
  * - 目標から作った予定（まだ予定のもの）は消し、目標は止める
  */
 async function migratePlans(raw: Raw, d: AppData, today: string): Promise<boolean> {
-  if (raw.missing?.length || d.settings.plansFrom) return false;
-  const s = d.settings, cur = ymOf(today);
+  // 写した目標は止めるので、動いている目標があるときだけ写す（前の版の取り込みで目標が入ったときも）
   const active = d.goals.filter((g) => g.active);
+  if (raw.missing?.length || !active.length) return false;
+  const s = d.settings, cur = ymOf(today);
   const accounts: Row[] = [], debts: Row[] = [], funds: Row[] = [], plans: Row[] = [];
   const groups = new Map<string, Goal[]>();
   for (const g of active.filter((g) => g.kind === "repay")) {
