@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  billsFor, DEFAULT_SETTINGS, debtLeft, forecast, normalizeBills, planBucket, planMinusItems, planNeed, planStatus, reserveAt, syncLumps,
+  DEFAULT_SETTINGS, debtLeft, duplicateInstallments, forecast, normalizeBills, planBucket, planMinusItems, planNeed, planStatus, reserveAt, syncLumps,
   type AccountEntry, type Data, type Plan, type PlanDebt, type PlanFund,
 } from "./index";
 
@@ -159,11 +159,11 @@ describe("カードの請求の見込み", () => {
 });
 
 describe("リボの支払いの二重計上", () => {
-  it("計画の支払いがカードの請求と一緒に出るなら、その請求のクレカ明細の分割（返済）は数えない", () => {
+  it("計画の支払いがカードの請求と一緒に出るなら、その請求に入るクレカ明細の分割（返済）は同じもの", () => {
     const inst = { id: "i1", card: "saison", status: "confirmed" as const, date: "2026-11-30", amount: 10000, group: "installment" as const, category: null, name: "リボの返済", shop: "", memo: "", tatekae: 0, source: "migration" as const, source_ref: null, merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: null };
+    const other = { ...inst, id: "i2", date: "2026-12-31" }; // 1月の請求（計画の支払いがない）
     const pay = A({ plan_id: "p1", plan_role: "pay", card: "saison", date: "2026-12-04", amount: 10000 });
-    const bill = (d: Data) => billsFor(d, "2026-12").find((b) => b.card.id === "saison")!.estimate;
-    expect(bill(D({ cards: [inst] }))).toBe(10000);
-    expect(bill(D({ cards: [inst], accounts: [pay] }))).toBe(0);
+    expect(duplicateInstallments(D({ cards: [inst, other], accounts: [pay] })).map((e) => e.id)).toEqual(["i1"]);
+    expect(duplicateInstallments(D({ cards: [inst] }))).toEqual([]);
   });
 });
