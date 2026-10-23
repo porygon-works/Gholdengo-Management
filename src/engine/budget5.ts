@@ -4,6 +4,7 @@ import { budgetsFor } from "./compute";
 import { leaf, ofRows, sum, type Part, type PartRow } from "./breakdown";
 import { loanMonthlyOf } from "./loan";
 import { planMonthlyOf } from "./reserve";
+import { spendTarget } from "./links";
 import { ownCost } from "./schedule";
 import { budgetCats, isFixedCat, RESERVE, type AccountEntry, type CardEntry, type Data } from "./types";
 
@@ -44,7 +45,7 @@ export const accountRow = (e: AccountEntry): PartRow => ({ date: e.date, name: e
 export const cardRow = (e: CardEntry, amount = e.amount): PartRow => ({ date: e.date, name: e.name || e.shop || e.category || "クレカ", amount, plan: e.status === "plan", ref: { kind: "card", id: e.id } });
 
 /** 計画にひも付けた購入の明細（予算に数えない） */
-export const linkedSpends = (d: Data) => new Set(d.v5.moves.filter((m) => m.kind === "spend" && m.entry_id).map((m) => `${m.entry_kind}:${m.entry_id}`));
+export const linkedSpends = (d: Data) => new Set(d.v5.moves.map((m) => spendTarget(d, m)).filter((x): x is string => !!x));
 
 /**
  * その月の、予算に数える出費。クレカ明細の変動費・固定費・分割（購入）（リボに回した明細も、その費目で数える）と、口座明細の出金の変動費・固定費。

@@ -1,5 +1,6 @@
 import { addDays, addMonths, ymOf } from "./dates";
 import { ofRows, sum, type Part, type PartRow } from "./breakdown";
+import { spendTarget } from "./links";
 import type { Data, V5Plan } from "./types";
 
 // 計画（購入・貯蓄）の積立額と確保額（設計書 §3.3）。返済の計画は積立額を持たない
@@ -27,7 +28,8 @@ export function savedAt(d: Data, p: V5Plan, t: string, projected = false): Part 
       const e = d.accounts.find((x) => x.id === m.bonus_entry_id);
       if (!e || e.date > t || (e.status !== "confirmed" && !projected)) continue;
       evs.push({ date: e.date, kind: "bonus", amount: m.amount, id: m.id, name: `${e.name || "賞与"}から` });
-    } else evs.push({ date: m.date, kind: m.kind, amount: m.amount, id: m.id, name: m.memo || { manual: "余裕額から", draw: "取り崩し", spend: "購入" }[m.kind] });
+    } else if (m.kind === "spend" && !spendTarget(d, m)) continue;
+    else evs.push({ date: m.date, kind: m.kind, amount: m.amount, id: m.id, name: m.memo || { manual: "余裕額から", draw: "取り崩し", spend: "購入" }[m.kind] });
   }
   const order = { monthly: 0, manual: 1, bonus: 1, draw: 2, spend: 2 };
   evs.sort((a, b) => a.date.localeCompare(b.date) || order[a.kind] - order[b.kind]);

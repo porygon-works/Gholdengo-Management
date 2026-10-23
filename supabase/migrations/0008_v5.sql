@@ -74,6 +74,9 @@ create table if not exists ggmg.v5_months (
 create index if not exists v5_loan_balances_loan on ggmg.v5_loan_balances (loan_id);
 create index if not exists v5_moves_plan on ggmg.v5_moves (plan_id);
 
+-- クレカ明細をリボに回した日（借入残高に足すのはこの日）
+alter table ggmg.card_entries add column if not exists revolved_at date;
+
 -- 口座明細の大費目に「賞与」を足す
 alter table ggmg.account_entries drop constraint if exists account_entries_group_check;
 alter table ggmg.account_entries add constraint account_entries_group_check

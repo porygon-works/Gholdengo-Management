@@ -65,6 +65,8 @@ export interface CardEntry {
   recurring_id: string | null;
   goal_id: string | null;
   at?: string;
+  /** v5：リボに回した日（借入残高に足すのはこの日。設計書 §3.4） */
+  revolved_at?: string | null;
 }
 
 // ---------- マスタ ----------

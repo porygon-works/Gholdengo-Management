@@ -1,7 +1,7 @@
 import { addDays, addMonths, ymOf } from "./dates";
 import { sum, leaf, type Part, type PartRow } from "./breakdown";
 import { loanAt, loanPayments } from "./loan";
-import { bankOn, bills5, budgetToSpend, estimateRow, slackAt } from "./slack";
+import { bankOn, bills5, budgetToSpend, estimatePending, estimateRow, slackAt } from "./slack";
 import type { Data, V5Plan } from "./types";
 
 // 見通し（設計書 §4.2）：先の日の口座残高と余裕額の見込み。予算は予算どおりに使う前提
@@ -34,13 +34,16 @@ export function projectedRows(d: Data, today: string, to: string): FlowRow5[] {
   for (let ym = cur; ym <= last; ym = addMonths(ym, 1)) {
     if (d.accounts.some((e) => e.direction === "in" && e.group === "salary" && ymOf(e.date) === ym)) continue;
     const r = estimateRow(d, ym);
-    if (r.amount && r.date > today && r.date <= to) rows.push({ date: r.date, name: r.name, amount: r.amount, kind: "salary", virtual: true, ref: r.ref });
+    if (!r.amount || r.date > to) continue;
+    // 給料日を過ぎても給料日以後の残高をまだ入れていなければ、今日に入ったとする
+    if (r.date > today) rows.push({ date: r.date, name: r.name, amount: r.amount, kind: "salary", virtual: true, ref: r.ref });
+    else if (estimatePending(d, ym, today)) rows.push({ date: today, name: r.name, amount: r.amount, kind: "salary", virtual: true, ref: r.ref });
   }
   const extra = assumed(d, today);
   for (let ym = addMonths(cur, -1); ym <= addMonths(last, 1); ym = addMonths(ym, 1)) {
     for (const b of bills5(d, ym)) {
       if (b.date <= today || b.date > to) continue;
-      const amount = b.amount + (b.row && (b.row.status === "confirmed" || b.row.locked) ? 0 : extra(b.card.id, b.closingYm));
+      const amount = b.amount + (b.row?.locked ? 0 : extra(b.card.id, b.closingYm));
       if (amount > 0) rows.push({ date: b.date, name: `${b.card.name} ${+b.closingYm.slice(5)}月分`, amount: -amount, kind: "bill", virtual: !b.row, ref: b.row ? { kind: "account", id: b.row.id } : { kind: "virtual", id: `bill:${b.card.id}:${b.date}` } });
     }
   }
@@ -60,7 +63,7 @@ export function bankAhead(d: Data, t: string, today: string, rows = projectedRow
 export function slackOn(d: Data, t: string, today: string, rows?: FlowRow5[]): Part {
   if (t <= today) return slackAt(d, t, today);
   const extra = assumed(d, today), ym = ymOf(t);
-  return slackAt(d, t, today, { bank: bankAhead(d, t, today, rows), projected: true, extraBill: (b) => (b.closingYm < ym && !(b.row && (b.row.status === "confirmed" || b.row.locked)) ? extra(b.card.id, b.closingYm) : 0) });
+  return slackAt(d, t, today, { bank: bankAhead(d, t, today, rows), projected: true, extraBill: (b) => (b.closingYm < ym && !b.row?.locked ? extra(b.card.id, b.closingYm) : 0) });
 }
 
 /** from〜to の日ごとの口座残高と余裕額。過去は記録から計算し直す */

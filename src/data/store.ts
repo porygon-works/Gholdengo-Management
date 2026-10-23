@@ -3,7 +3,7 @@ import {
   addMonths, applyLabels, budgetFundDate, guideOf, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, duplicateInstallments, findMerges, withBills, goalPayDate, goalSchedule, groupOfCat, missingRecurring, normalizeBills, RESERVE, ruleFor, syncBills, syncLumps, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type Loan, type LoanBalance, type PlanMove, type V5Data, type V5Month, type V5Plan, type CardEntry, type Data, type FundSource, type Goal, type MonthSetting, type Plan, type PlanDebt, type PlanFund, type PlanKind, type Recurring, type Rule, type Settings, type Status,
 } from "../engine";
-import { backend, newId, type Raw, type Row } from "./backend";
+import { backend, newId, V4_TABLES, type Raw, type Row } from "./backend";
 import { SEED_RULES } from "./seed";
 import { snapshot } from "./snapshot";
 import { convertBill, convertDebt, convertEntry, recurringFromRow } from "./v2";
@@ -25,6 +25,9 @@ function settingsOf(raw: Raw): Settings {
   return s;
 }
 
+/** v4 の表（0007）がまだないか。v5 の表（0008）がないだけなら false */
+export const v4Missing = (raw: Raw) => !!raw.missing?.some((t) => (V4_TABLES as string[]).includes(t));
+
 export function toData(raw: Raw): AppData {
   const settings = settingsOf(raw);
   applyLabels(settings);
@@ -42,6 +45,7 @@ export function toData(raw: Raw): AppData {
     group: (r.group as CardEntry["group"]) || "variable", category: opt(r.category), name: str(r.name), shop: str(r.shop), memo: str(r.memo), tatekae: num(r.tatekae),
     source: (r.source as CardEntry["source"]) || "manual", source_ref: opt(r.source_ref), merged_into: opt(r.merged_into),
     not_dup: Array.isArray(r.not_dup) ? (r.not_dup as string[]) : [], locked: !!r.locked, recurring_id: opt(r.recurring_id), goal_id: opt(r.goal_id), at: str(r.created_at) || undefined,
+    revolved_at: r.revolved_at ? day(r.revolved_at) : null,
   }));
   const balances: Balance[] = raw.balances.map((r) => ({ id: str(r.id), date: day(r.date), bank: num(r.bank), cash: num(r.cash), paypay: num(r.paypay), memo: str(r.memo), at: str(r.created_at) }));
   const recurring: Recurring[] = raw.recurring.map((r) => recurringFromRow(r, settings));
@@ -197,7 +201,7 @@ async function migrate6(raw: Raw, d: AppData): Promise<boolean> {
 async function migratePlans(raw: Raw, d: AppData, today: string): Promise<boolean> {
   // 写した目標は止めるので、動いている目標があるときだけ写す（前の版の取り込みで目標が入ったときも）
   const active = d.goals.filter((g) => g.active);
-  if (raw.missing?.length || !active.length) return false;
+  if (v4Missing(raw) || !active.length) return false;
   const s = d.settings, cur = ymOf(today);
   const accounts: Row[] = [], debts: Row[] = [], funds: Row[] = [], plans: Row[] = [];
   const groups = new Map<string, Goal[]>();
@@ -623,7 +627,7 @@ export const actions5 = {
     backend.upsertKeyed("v5_months", [amount == null ? { month, budget: guideOf(d, month).amount, source: "guide" } : { month, budget: amount, source: "decided" }]),
 
   /** クレカ明細をリボに回す・戻す */
-  toRevolving: (d: Data, e: CardEntry, on: boolean) => backend.update("card_entries", e.id, { ...revolvingPatch(d.settings, e, on), locked: true }),
+  toRevolving: (d: Data, e: CardEntry, on: boolean, today: string) => backend.update("card_entries", e.id, { ...revolvingPatch(d.settings, e, on), revolved_at: on ? today : null, locked: true }),
   /** 口座明細を費目ごとの行に分ける */
   async splitAccount(d: Data, e: AccountEntry, parts: { category: string; amount: number }[]) {
     const r = splitRows(d.settings, e, parts);

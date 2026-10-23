@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_GROUP_LABEL, DEFAULT_SETTINGS, IN_GROUPS } from "../engine";
 import type { Raw } from "./backend";
-import { toData } from "./store";
+import { toData, v4Missing } from "./store";
 
 // v5 の表の読み込み（値はすべて作り物）
 const empty = (): Raw => ({
@@ -40,5 +40,12 @@ describe("v5 の表を読む", () => {
 
   it("変動費の費目に「現金」がある（ATM の引き出し）", () => {
     expect(DEFAULT_SETTINGS.varCats).toContain("現金");
+  });
+
+  it("リボに回した日を読む。v5 の表がないだけなら、v4 の表はそろっている", () => {
+    const raw = { ...empty(), card_entries: [{ id: "c1", card: "saison", status: "confirmed", group: "purchase", date: "2026-11-01", amount: "80000", revolved_at: "2026-11-20" }], missing: ["v5_plans"] } as unknown as Raw;
+    expect(toData(raw).cards[0].revolved_at).toBe("2026-11-20");
+    expect(v4Missing(raw)).toBe(false);
+    expect(v4Missing({ ...raw, missing: ["plans"] } as unknown as Raw)).toBe(true);
   });
 });

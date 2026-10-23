@@ -208,7 +208,8 @@ function CardV5({ store, data, entry, onClose }: { store: Store; data: AppData; 
   const linked = data.v5.moves.find((m) => m.kind === "spend" && m.entry_kind === "card" && m.entry_id === entry.id);
   const buys = data.v5.plans.filter((p) => p.kind === "buy" && !p.done);
   const [planId, setPlanId] = useState(buys[0]?.id ?? "");
-  const revolve = async (on: boolean) => { if (await store.run(() => actions5.toRevolving(data, entry, on))) { toast(on ? "リボに回しました" : "リボから戻しました"); onClose(); } };
+  const revolve = async (on: boolean) => { if (await store.run(() => actions5.toRevolving(data, entry, on, todayJST()))) { toast(on ? "リボに回しました" : "リボから戻しました"); onClose(); } };
+  const hasLoan = data.v5.loans.some((l) => l.card === entry.card);
   const link = async () => {
     if (!planId) return;
     if (await store.run(() => actions5.addMove({ plan_id: planId, kind: "spend", amount: entry.amount, date: entry.date, bonus_entry_id: null, entry_kind: "card", entry_id: entry.id, memo: cardTitle(entry) }))) { toast("計画にひも付けました"); onClose(); }
@@ -217,7 +218,7 @@ function CardV5({ store, data, entry, onClose }: { store: Store; data: AppData; 
     <div className="panel">
       <div className="btns">
         {entry.group === "purchase" ? <button className="btn sm ghost" onClick={() => revolve(false)}>リボから戻す</button>
-          : (entry.group === "variable" || entry.group === "fixed") && <button className="btn sm ghost" onClick={() => revolve(true)}>リボに回す</button>}
+          : (entry.group === "variable" || entry.group === "fixed") && (hasLoan ? <button className="btn sm ghost" onClick={() => revolve(true)}>リボに回す</button> : <span className="note">リボに回すには、計画の「借入」にこのカードの借入を足してください</span>)}
       </div>
       {linked ? (
         <div className="note">計画「{data.v5.plans.find((p) => p.id === linked.plan_id)?.name}」にひも付けています（予算に数えず、積立額から払う） <button className="btn sm ghost" onClick={() => store.run(() => actions5.removeMove(linked.id))}>外す</button></div>

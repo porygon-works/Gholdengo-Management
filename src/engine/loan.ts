@@ -12,9 +12,15 @@ export function loanPayDate(d: Data, loan: Loan, ym: string): string {
   return shiftBusiness(dayOf(ym, loan.pay_day || 27), "next");
 }
 
-/** その借入のカードでリボに回した明細（分割（購入）） */
-export const revolvedOf = (d: Data, loan: Loan): CardEntry[] =>
-  loan.card ? d.cards.filter((e) => isLive(e) && e.group === "purchase" && cardOf(d.settings, e.card).id === loan.card) : [];
+/**
+ * その借入のカードでリボに回した明細（分割（購入））と、借入残高に足す日（リボに回した日。なければ利用日）。
+ * 同じカードの借入が2つ以上あれば、並びが先の借入に足す
+ */
+export function revolvedOf(d: Data, loan: Loan): { entry: CardEntry; date: string }[] {
+  if (!loan.card || d.v5.loans.filter((l) => l.card === loan.card).sort((a, b) => a.sort - b.sort)[0]?.id !== loan.id) return [];
+  return d.cards.filter((e) => isLive(e) && e.group === "purchase" && cardOf(d.settings, e.card).id === loan.card)
+    .map((entry) => ({ entry, date: entry.revolved_at && entry.revolved_at > entry.date ? entry.revolved_at : entry.date }));
+}
 
 const records = (d: Data, loan: Loan): LoanBalance[] =>
   d.v5.balances.filter((b) => b.loan_id === loan.id).sort((a, b) => a.date.localeCompare(b.date) || (a.at ?? "").localeCompare(b.at ?? ""));
@@ -34,7 +40,7 @@ function timeline(d: Data, loan: Loan, until: string): Ev[] {
   const plan = loan.plan_id ? d.v5.plans.find((p) => p.id === loan.plan_id && p.kind === "repay" && !p.done && p.due_date) : undefined;
   type Raw = { date: string; order: number; run: (bal: number) => Ev };
   const raw: Raw[] = [];
-  for (const e of revolvedOf(d, loan)) if (e.date > start && e.date <= until) raw.push({ date: e.date, order: 0, run: (b) => ({ kind: "purchase", date: e.date, entry: e, after: b + e.amount }) });
+  for (const { entry: e, date } of revolvedOf(d, loan)) if (date > start && date <= until) raw.push({ date, order: 0, run: (b) => ({ kind: "purchase", date, entry: e, after: b + e.amount }) });
   for (let ym = ymOf(start); ym <= ymOf(until); ym = addMonths(ym, 1)) {
     const date = loanPayDate(d, loan, ym);
     if (date <= start || date > until || !loan.monthly) continue;
