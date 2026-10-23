@@ -61,7 +61,9 @@ export function billsFor(d: Data, payYm: string): Bill[] {
   return s.cards.map((c) => {
     const closingYm = closingFor(payYm, s, c.id);
     const date = cardPayDate(closingYm, s, c.id);
-    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && cardOf(s, e.card).id === c.id && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
+    // 計画の支払い（リボの毎月の支払い）がこの請求と一緒に出るなら、クレカ明細の分割（返済）は数えない（同じ支払いを二重に数えない）
+    const planPay = d.accounts.some((e) => e.plan_id && e.plan_role === "pay" && e.card === c.id && e.date === date);
+    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && !(planPay && e.group === "installment") && cardOf(s, e.card).id === c.id && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
     const estimate = items.reduce((a, e) => a + e.amount, 0);
     const row = d.accounts.find((e) => e.source_ref === billRef(c.id, date)) ?? null;
     const amount = row && (row.status === "confirmed" || row.locked) ? row.amount : estimate;

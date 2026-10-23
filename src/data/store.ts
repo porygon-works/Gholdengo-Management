@@ -232,6 +232,10 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
 
   const cur = ymOf(today);
   const months = [0, 1, 2, 3, 4, 5].map((k) => addMonths(cur, k));
+  // 計画に写したあとに残った、前の版の目標から作った予定（臨時の返済など）は消す（計画のまとめて払う行と二重になるため）
+  if (d.plans.length && !d.goals.some((g) => g.active)) {
+    for (const e of d.accounts) if (e.source === "goal" && e.status === "plan" && e.date > today) { await backend.remove("account_entries", e.id); wrote = true; }
+  }
   // まとめて払う（使う）行を、計画の残高・使う日に合わせる
   const ls = syncLumps(d);
   if (ls.inserts.length) { await backend.insert("account_entries", ls.inserts as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
