@@ -106,17 +106,20 @@ function billEntry(b: Bill, today: string): Omit<AccountEntry, "id"> {
 export function syncBills(d: Data, today: string, payMonths: string[]) {
   const inserts: Omit<AccountEntry, "id">[] = [];
   const updates: { id: string; patch: Partial<AccountEntry> }[] = [];
+  const removes: string[] = [];
   for (const ym of payMonths) {
     for (const b of billsFor(d, ym)) {
       if (!b.row) { if (b.estimate > 0 && !d.removedRefs?.includes(billRef(b.card.id, b.date))) inserts.push(billEntry(b, today)); continue; }
       if (b.row.status === "confirmed") continue;
+      // 見込みが0になった予定の行（中身がなくなった請求）は消す
+      if (!b.row.locked && b.estimate === 0) { removes.push(b.row.id); continue; }
       const patch: Partial<AccountEntry> = {};
       if (!b.row.locked && b.row.amount !== b.estimate) patch.amount = b.estimate;
       if (b.date <= today) patch.status = "confirmed";
       if (Object.keys(patch).length) updates.push({ id: b.row.id, patch });
     }
   }
-  return { inserts, updates };
+  return { inserts, updates, removes };
 }
 
 /** 保存していない請求の行も足した口座明細（計算用。来月の請求はまだ行がないことがある） */

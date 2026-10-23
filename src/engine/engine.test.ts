@@ -150,6 +150,10 @@ describe("クレカの請求（口座明細のクレカ支払い）", () => {
     const done = { ...row, status: "confirmed" as const, amount: 15800 };
     expect(syncBills({ ...d, accounts: [done] }, "2026-11-26", ["2026-11"]).updates).toEqual([]);
     expect(billsFor({ ...d, accounts: [done] }, "2026-11")[0].amount).toBe(15800);
+    // 中身がなくなった（見込みが0の）予定の行は消す。確定の額が入った行は消さない
+    const empty = A({ id: "z", group: "card", card: "smbc", status: "plan", amount: 1, date: "2027-02-26", source: "card_bill", source_ref: "bill:smbc:2027-02-26" });
+    expect(syncBills({ ...d, accounts: [empty] }, "2026-10-21", ["2027-02"]).removes).toEqual(["z"]);
+    expect(syncBills({ ...d, accounts: [{ ...empty, locked: true }] }, "2026-10-21", ["2027-02"]).removes).toEqual([]);
   });
 });
 
