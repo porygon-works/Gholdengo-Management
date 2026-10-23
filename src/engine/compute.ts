@@ -61,9 +61,7 @@ export function billsFor(d: Data, payYm: string): Bill[] {
   return s.cards.map((c) => {
     const closingYm = closingFor(payYm, s, c.id);
     const date = cardPayDate(closingYm, s, c.id);
-    // 計画の支払い（リボの毎月の支払い）がこの請求と一緒に出るなら、クレカ明細の分割（返済）は数えない（同じ支払いを二重に数えない）
-    const planPay = d.accounts.some((e) => e.plan_id && e.plan_role === "pay" && e.card === c.id && e.date === date);
-    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && !(planPay && e.group === "installment") && cardOf(s, e.card).id === c.id && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
+    const items = d.cards.filter((e) => isLive(e) && e.group !== "purchase" && cardOf(s, e.card).id === c.id && closingMonth(e.date, s, c.id) === closingYm).sort((a, b) => a.date.localeCompare(b.date));
     const estimate = items.reduce((a, e) => a + e.amount, 0);
     const row = d.accounts.find((e) => e.source_ref === billRef(c.id, date)) ?? null;
     const amount = row && (row.status === "confirmed" || row.locked) ? row.amount : estimate;
@@ -98,28 +96,39 @@ function billEntry(b: Bill, today: string): Omit<AccountEntry, "id"> {
 }
 
 /**
- * 口座明細のクレカ支払いの行を、クレカ明細に合わせる。
- * - なければ作る（見込みが0なら作らない）
- * - 予定のあいだ（本人が直していなければ）は、額を見込みに合わせる
- * - 引落日が来たら確定にする（確定の額がまだなら見込みで）
+ * クレカ支払いの行は、口座のお金が動いたこと（引き落とし）か、カード会社の確定の額だけを保存する（§3.3）。
+ * まだ確定していない先の請求は保存せず、毎回クレカ明細から出す（accountsWithBills）。
+ * - 引落日が来て確定の額がなければ、見込みの額で確定の行を作る
+ * - 前の版で作った、先の日付の見込みの行（予定・本人が直していない）は消す
  */
 export function syncBills(d: Data, today: string, payMonths: string[]) {
   const inserts: Omit<AccountEntry, "id">[] = [];
   const updates: { id: string; patch: Partial<AccountEntry> }[] = [];
-  const removes: string[] = [];
+  const removes = d.accounts.filter((e) => e.source === "card_bill" && e.status === "plan" && !e.locked && e.date > today).map((e) => e.id);
   for (const ym of payMonths) {
     for (const b of billsFor(d, ym)) {
+      if (b.date > today) continue;
       if (!b.row) { if (b.estimate > 0 && !d.removedRefs?.includes(billRef(b.card.id, b.date))) inserts.push(billEntry(b, today)); continue; }
-      if (b.row.status === "confirmed") continue;
-      // 見込みが0になった予定の行（中身がなくなった請求）は消す
-      if (!b.row.locked && b.estimate === 0) { removes.push(b.row.id); continue; }
-      const patch: Partial<AccountEntry> = {};
-      if (!b.row.locked && b.row.amount !== b.estimate) patch.amount = b.estimate;
-      if (b.date <= today) patch.status = "confirmed";
-      if (Object.keys(patch).length) updates.push({ id: b.row.id, patch });
+      if (b.row.status === "plan") updates.push({ id: b.row.id, patch: b.row.locked ? { status: "confirmed" } : { status: "confirmed", amount: b.estimate } });
     }
   }
   return { inserts, updates, removes };
+}
+
+/** 画面で使う口座明細：保存していない先のクレカ支払い（見込み）も足す。前の月〜6か月先 */
+export function withBills<T extends Data>(d: T, today: string): T {
+  const cur = ymOf(today);
+  return { ...d, accounts: accountsWithBills(d, today, Array.from({ length: 8 }, (_, k) => addMonths(cur, k - 1))) };
+}
+
+/**
+ * 計画の支払いと同じものの、クレカ明細の分割（返済）。
+ * 計画の支払い（カードの請求と一緒に出る）があれば、その請求に入る分割（返済）の明細は同じ支払いなので、明細から外す（消した印をつけて残す）
+ */
+export function duplicateInstallments(d: Data): CardEntry[] {
+  const s = d.settings;
+  const pays = new Set(d.accounts.filter((e) => e.plan_id && e.plan_role === "pay" && e.card).map((e) => `${e.card}:${e.date}`));
+  return d.cards.filter((e) => isLive(e) && e.group === "installment" && pays.has(`${cardOf(s, e.card).id}:${cardPayDate(closingMonth(e.date, s, e.card), s, e.card)}`));
 }
 
 /** 保存していない請求の行も足した口座明細（計算用。来月の請求はまだ行がないことがある） */

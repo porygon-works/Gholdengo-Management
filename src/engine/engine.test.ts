@@ -141,19 +141,22 @@ describe("クレカの請求（口座明細のクレカ支払い）", () => {
     expect([smbc.date, smbc.estimate, smbc.amount]).toEqual(["2026-11-26", 16000, 16000]);
     expect([saison.date, saison.estimate]).toEqual(["2026-11-04", 80000]);
   });
-  it("行がなければ予定で作る。予定のあいだは見込みに合わせ、引落日が来たら確定する。確定した行は変えない", () => {
-    const a = syncBills(d, "2026-10-21", ["2026-11"]);
-    expect(a.inserts.map((e) => [e.name, e.date, e.amount, e.status, e.group])).toEqual([["三井 10月分", "2026-11-26", 16000, "plan", "card"], ["セゾン 10月分", "2026-11-04", 80000, "plan", "card"]]);
+  it("先の請求は保存せずに見込みで出す。引落日が来たら見込みの額で確定の行を作る。確定した行は変えない。前の版の見込みの行は消す", () => {
+    // 引落日の前：保存しない（見通し・明細には accountsWithBills の見込みで出る）
+    expect(syncBills(d, "2026-10-21", ["2026-11"]).inserts).toEqual([]);
+    const virt = accountsWithBills(d, "2026-10-21", ["2026-11"]).filter((e) => e.group === "card");
+    expect(virt.map((e) => [e.name, e.date, e.amount, e.status])).toEqual([["三井 10月分", "2026-11-26", 16000, "plan"], ["セゾン 10月分", "2026-11-04", 80000, "plan"]]);
+    // 引落日が来た：見込みの額で確定の行を作る
+    expect(syncBills(d, "2026-11-26", ["2026-11"]).inserts.map((e) => [e.name, e.amount, e.status])).toEqual([["三井 10月分", 16000, "confirmed"], ["セゾン 10月分", 80000, "confirmed"]]);
+    // 前の版の見込みの行：先の日付なら消す、引落日が来ていれば確定にする
     const row = A({ id: "r", group: "card", card: "smbc", status: "plan", amount: 1, date: "2026-11-26", source: "card_bill", source_ref: "bill:smbc:2026-11-26" });
-    expect(syncBills({ ...d, accounts: [row] }, "2026-10-21", ["2026-11"]).updates).toEqual([{ id: "r", patch: { amount: 16000 } }]);
-    expect(syncBills({ ...d, accounts: [row] }, "2026-11-26", ["2026-11"]).updates).toEqual([{ id: "r", patch: { amount: 16000, status: "confirmed" } }]);
-    const done = { ...row, status: "confirmed" as const, amount: 15800 };
-    expect(syncBills({ ...d, accounts: [done] }, "2026-11-26", ["2026-11"]).updates).toEqual([]);
+    expect(syncBills({ ...d, accounts: [row] }, "2026-10-21", ["2026-11"]).removes).toEqual(["r"]);
+    expect(syncBills({ ...d, accounts: [row] }, "2026-11-26", ["2026-11"]).updates).toEqual([{ id: "r", patch: { status: "confirmed", amount: 16000 } }]);
+    // 確定の額が入った行は変えない・消さない
+    const done = { ...row, status: "confirmed" as const, amount: 15800, locked: true };
+    const s1 = syncBills({ ...d, accounts: [done] }, "2026-10-21", ["2026-11"]);
+    expect([s1.updates, s1.removes]).toEqual([[], []]);
     expect(billsFor({ ...d, accounts: [done] }, "2026-11")[0].amount).toBe(15800);
-    // 中身がなくなった（見込みが0の）予定の行は消す。確定の額が入った行は消さない
-    const empty = A({ id: "z", group: "card", card: "smbc", status: "plan", amount: 1, date: "2027-02-26", source: "card_bill", source_ref: "bill:smbc:2027-02-26" });
-    expect(syncBills({ ...d, accounts: [empty] }, "2026-10-21", ["2027-02"]).removes).toEqual(["z"]);
-    expect(syncBills({ ...d, accounts: [{ ...empty, locked: true }] }, "2026-10-21", ["2027-02"]).removes).toEqual([]);
   });
 });
 

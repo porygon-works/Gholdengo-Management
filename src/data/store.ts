@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, applyLabels, budgetFundDate, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, findMerges, goalPayDate, goalSchedule, groupOfCat, missingRecurring, normalizeBills, RESERVE, ruleFor, syncBills, syncLumps, todayJST, ymOf,
+  addMonths, applyLabels, budgetFundDate, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, duplicateInstallments, findMerges, withBills, goalPayDate, goalSchedule, groupOfCat, missingRecurring, normalizeBills, RESERVE, ruleFor, syncBills, syncLumps, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type FundSource, type Goal, type MonthSetting, type Plan, type PlanDebt, type PlanFund, type PlanKind, type Recurring, type Rule, type Settings, type Status,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
@@ -214,8 +214,9 @@ async function migratePlans(raw: Raw, d: AppData, today: string): Promise<boolea
   if (debts.length) await backend.insert("plan_debts", debts);
   if (funds.length) await backend.insert("plan_funds", funds);
   if (accounts.length) await backend.insert("account_entries", accounts, { onConflict: "source_ref" });
-  for (const e of d.accounts) if (e.source === "goal" && e.status === "plan" && !e.locked) await backend.remove("account_entries", e.id);
-  for (const e of d.cards) if (e.source === "goal" && e.status === "plan" && !e.locked && !e.merged_into) await backend.remove("card_entries", e.id);
+  // 目標から作った予定は、計画の取引に置き換わるので消す（本人が直したものも、計画の側で直す）
+  for (const e of d.accounts) if (e.source === "goal" && e.status === "plan") await backend.remove("account_entries", e.id);
+  for (const e of d.cards) if (e.source === "goal" && e.status === "plan" && !e.merged_into) await backend.remove("card_entries", e.id);
   for (const g of active) await backend.update("goals", g.id, { active: false });
   await backend.upsertKeyed("settings", [{ data: { ...s, plansFrom: new Date().toISOString() } }]);
   return true;
@@ -232,10 +233,14 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
 
   const cur = ymOf(today);
   const months = [0, 1, 2, 3, 4, 5].map((k) => addMonths(cur, k));
-  // 計画に写したあとに残った、前の版の目標から作った予定（臨時の返済など）は消す（計画のまとめて払う行と二重になるため）
-  if (d.plans.length && !d.goals.some((g) => g.active)) {
-    for (const e of d.accounts) if (e.source === "goal" && e.status === "plan" && e.date > today) { await backend.remove("account_entries", e.id); wrote = true; }
+  // お金の動き1つにつき行は1つ（§3.4）
+  // - 目標マスタは使わない（計画に写した）。目標から作った予定は計画の取引に置き換わったので持たない
+  // - 計画の支払いと同じもの（クレカ明細の分割（返済））は、消した印をつけて残す
+  if (!d.goals.some((g) => g.active)) {
+    for (const e of d.accounts) if (e.source === "goal" && e.status === "plan") { await backend.remove("account_entries", e.id); wrote = true; }
+    for (const e of d.cards) if (e.source === "goal" && e.status === "plan" && !e.merged_into) { await backend.remove("card_entries", e.id); wrote = true; }
   }
+  for (const e of duplicateInstallments(d)) { await backend.update("card_entries", e.id, { deleted: true }); wrote = true; }
   // まとめて払う（使う）行を、計画の残高・使う日に合わせる
   const ls = syncLumps(d);
   if (ls.inserts.length) { await backend.insert("account_entries", ls.inserts as unknown as Row[], { onConflict: "source_ref" }); wrote = true; }
@@ -286,7 +291,8 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
 }
 
 export function useStore() {
-  const [data, setData] = useState<AppData | null>(() => { const c = readCache(); return c ? toData(c) : null; });
+  // 画面には、保存していない先のクレカ支払い（見込み）も足して渡す
+  const [data, setData] = useState<AppData | null>(() => { const c = readCache(); return c ? withBills(toData(c), todayJST()) : null; });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // 読み直しは1つずつ順番に行う。読み直しの最中に頼まれたら、終わってからもう1回読む（保存や削除のあとに古い画面が残らないように）
@@ -304,7 +310,7 @@ export function useStore() {
         raw = await backend.load();
       }
       saveCache(raw);
-      const d = toData(raw);
+      const d = withBills(toData(raw), today);
       setData(d);
       setError(null);
       await saveSnapshot(d, today);
