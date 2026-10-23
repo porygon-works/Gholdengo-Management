@@ -1,7 +1,7 @@
 import { addDays, addMonths, dayOf, lastDay, shiftBusiness, ymOf } from "./dates";
 import { isLive } from "./merge";
-import { cardPayDate, closingMonth } from "./schedule";
-import { accountNow, accountsWithBills, computeMonth } from "./compute";
+import { cardOf, cardPayDate, closingMonth } from "./schedule";
+import { accountNow, accountsWithBills, billName, computeMonth } from "./compute";
 import { type AccountEntry, type Data, type Plan, type PlanDebt, type PlanFund, type PlanKind } from "./types";
 
 // 計画（§3.4）と口座の見通し（§5.5）の計算。画面はここの関数だけを使う
@@ -146,19 +146,26 @@ export function forecast(d: Data, today: string, months = 6): Forecast | null {
   const start = `${addMonths(cur, -1)}-01`;
   const endYm = addMonths(cur, months - 1), end = dayOf(endYm, 31);
   const payMonths = Array.from({ length: months + 1 }, (_, k) => addMonths(cur, k));
-  const all = accountsWithBills(d, today, payMonths).filter((e) => e.account === "bank");
+  let all = accountsWithBills(d, today, payMonths).filter((e) => e.account === "bank");
 
-  // これからカードで使う見込み（今月〜。今月は残り予算、先の月はその月の予算から予定を引いた額）
+  // これからカードで使う見込み（今月〜。その月の残り予算）。いつものカードのその月の請求に足す。
+  // 予算を使い切るまでは請求の見込み ＝ 使った分 ＋ 残り予算（＝ 予算の額）、こえたら使った分。確定の額が入った請求には足さない
   const proj: { ym: string; amount: number; pay: string }[] = [];
+  const virt: AccountEntry[] = [];
   for (let k = 0; k < months; k++) {
     const ym = addMonths(cur, k);
     const amount = Math.max(0, computeMonth(d, ym, today).R);
-    if (amount > 0) proj.push({ ym, amount, pay: cardPayDate(ym, s, main) });
+    const pay = cardPayDate(ym, s, main);
+    if (amount <= 0) continue;
+    const i = all.findIndex((e) => e.group === "card" && e.source === "card_bill" && e.card === main && e.date === pay);
+    if (i >= 0 && all[i].locked) continue;
+    proj.push({ ym, amount, pay });
+    if (i >= 0) all = all.map((e, j) => (j === i ? { ...e, amount: e.amount + amount } : e));
+    else if (pay <= end) virt.push({
+      id: `proj:${ym}`, account: "bank", direction: "out", status: "plan", group: "card", category: null, name: billName({ card: cardOf(s, main), closingYm: ym }),
+      memo: "", date: pay, amount, source: "card_bill", source_ref: null, recurring_id: null, goal_id: null, card: main ?? null, pair_id: null, locked: false,
+    });
   }
-  const virt: AccountEntry[] = proj.filter((x) => x.pay <= end).map((x) => ({
-    id: `proj:${x.ym}`, account: "bank", direction: "out", status: "plan", group: "card", category: null, name: `${+x.ym.slice(5)}月にカードで使う見込み（残り予算）`,
-    memo: "", date: x.pay, amount: x.amount, source: "card_bill", source_ref: null, recurring_id: null, goal_id: null, card: main ?? null, pair_id: null, locked: false,
-  }));
 
   // 過ぎた日の残高：いまの残高から、その日のあと今日までの確定した明細を戻す
   const past = all.filter((e) => e.status === "confirmed" && e.date > start && e.date <= today).sort((a, b) => a.date.localeCompare(b.date));
