@@ -145,3 +145,15 @@ describe("使う日に入る分", () => {
     expect([st2.short, st2.spare, st2.ok]).toEqual([50000, 70000, true]);
   });
 });
+
+describe("カードの請求の見込み", () => {
+  it("予算を使い切るまでは予算の額で1行、こえたら使った分。確定の額が入ればその額", () => {
+    const card = (amount: number, date = "2026-11-05") => ({ id: `c${amount}${date}`, card: "smbc", status: "confirmed" as const, date, amount, group: "variable" as const, category: "食料品", name: "", shop: "", memo: "", tatekae: 0, source: "manual" as const, source_ref: null, merged_into: null, not_dup: [], locked: false, recurring_id: null, goal_id: null });
+    const base = { balances: [{ id: "b", date: "2026-11-01", bank: 100000, cash: 0, paypay: 0, memo: "" }], months: [{ month: "2026-11", budget: 10000, memo: "" }, { month: "2026-12", budget: 0, memo: "" }] };
+    const bills = (d: Data) => forecast(d, "2026-11-10", 2)!.rows.filter((r) => r.entry.group === "card" && r.date === "2026-12-28").map((r) => r.delta);
+    expect(bills(D({ ...base, cards: [card(8000)] }))).toEqual([-10000]);
+    expect(bills(D({ ...base, cards: [card(12000)] }))).toEqual([-12000]);
+    const locked = A({ id: "B", group: "card", source: "card_bill", source_ref: "bill:smbc:2026-12-28", card: "smbc", date: "2026-12-28", amount: 9000, locked: true, status: "confirmed" });
+    expect(bills(D({ ...base, cards: [card(8000)], accounts: [locked] }))).toEqual([-9000]);
+  });
+});

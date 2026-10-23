@@ -190,7 +190,7 @@ export function FlowView({ data, today, openRow }: { data: AppData; today: strin
             </tbody>
           </table>
         </div>
-        <div className="note">これからカードで使う分は、その月の残り予算を見込みにして、引落日に入れています。</div>
+        <div className="note">カードの請求の見込みは、予算を使い切るまでは予算の額（使った分 ＋ 残り予算）、こえたら使った分です。確定の額が入ればその額です。</div>
       </section>
     </>
   );
