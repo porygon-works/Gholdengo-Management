@@ -1,0 +1,52 @@
+import { addMonths, ymOf } from "./dates";
+import { budgetView } from "./budget5";
+import { lowest } from "./outlook";
+import { drawPlan } from "./reserve";
+import { slackValue } from "./slack";
+import type { AccountEntry, CardEntry, Data, PlanMove, V5Plan } from "./types";
+
+// 変更を当てる前と後の比べ（設計書 §4.3・§3.5）。保存する前に、何が変わるかを出す
+
+export type Change =
+  | { kind: "addAccount"; entry: Omit<AccountEntry, "id"> }
+  | { kind: "addCard"; entry: Omit<CardEntry, "id"> }
+  | { kind: "decideBudget"; month: string; amount: number }
+  | { kind: "addMove"; move: Omit<PlanMove, "id"> };
+
+/** 変更を Data の写しに当てる（元の d は変えない） */
+export function applyChange(d: Data, c: Change): Data {
+  switch (c.kind) {
+    case "addAccount": return { ...d, accounts: [...d.accounts, { ...c.entry, id: "whatif" }] };
+    case "addCard": return { ...d, cards: [...d.cards, { ...c.entry, id: "whatif" }] };
+    case "decideBudget": return { ...d, v5: { ...d.v5, months: [...d.v5.months.filter((m) => m.month !== c.month), { month: c.month, budget: c.amount, source: "decided" }] } };
+    case "addMove": return { ...d, v5: { ...d.v5, moves: [...d.v5.moves, { ...c.move, id: "whatif" }] } };
+  }
+}
+
+const monthOf = (c: Change, today: string) => (c.kind === "decideBudget" ? c.month : c.kind === "addMove" ? ymOf(today) : ymOf(c.entry.date));
+
+export interface Comparison {
+  slack: [number, number]; // 今日の余裕額の前と後
+  budget: { month: string; before: number; after: number }; // その月の予算残額
+  lowest: { date: string; bank: number }; // 後の、口座残高が一番少なくなる日（6か月先まで）
+  shortBudget: number; // その月の予算残額のマイナスの分
+  draw: { plan: V5Plan; amount: number }[] | null; // 0 以上からマイナスになるときの、取崩順に差し引く計画と額
+  warnOnly: boolean; // マイナスだが、確保額から差し引かない（もとからマイナス・差し引ける確保額がない）
+}
+
+export function compare(d: Data, c: Change, today: string): Comparison {
+  const after = applyChange(d, c);
+  const month = monthOf(c, today);
+  const s0 = slackValue(d, today, today), s1 = slackValue(after, today, today);
+  const b0 = budgetView(d, month, today).left.amount, b1 = budgetView(after, month, today).left.amount;
+  const crossing = s0 >= 0 && s1 < 0;
+  const draw = crossing ? drawPlan(after, -s1, today) : null;
+  return {
+    slack: [s0, s1],
+    budget: { month, before: b0, after: b1 },
+    lowest: lowest(after, today, `${addMonths(ymOf(today), 6)}-01`),
+    shortBudget: Math.max(0, -b1),
+    draw,
+    warnOnly: s1 < 0 && (!crossing || !draw?.length),
+  };
+}
