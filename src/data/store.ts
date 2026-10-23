@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  addMonths, applyLabels, budgetFundDate, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, duplicateInstallments, findMerges, withBills, goalPayDate, goalSchedule, groupOfCat, missingRecurring, normalizeBills, RESERVE, ruleFor, syncBills, syncLumps, todayJST, ymOf,
+  addMonths, applyLabels, budgetFundDate, guideOf, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, duplicateInstallments, findMerges, withBills, goalPayDate, goalSchedule, groupOfCat, missingRecurring, normalizeBills, RESERVE, ruleFor, syncBills, syncLumps, todayJST, ymOf,
   type AccountEntry, type Balance, type Budget, type Loan, type LoanBalance, type PlanMove, type V5Data, type V5Month, type V5Plan, type CardEntry, type Data, type FundSource, type Goal, type MonthSetting, type Plan, type PlanDebt, type PlanFund, type PlanKind, type Recurring, type Rule, type Settings, type Status,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
 import { SEED_RULES } from "./seed";
 import { snapshot } from "./snapshot";
 import { convertBill, convertDebt, convertEntry, recurringFromRow } from "./v2";
+import { atmRow, revolvingPatch, splitRows } from "./v5ops";
 
 export interface ReviewRow { id: string; kind: string; title: string; body: string; resolved: boolean; created_at: string }
 export interface AppData extends Data { review: ReviewRow[]; missing: string[] }
@@ -248,6 +249,8 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   if (await migratePlans(raw, d, today)) return true;
   let wrote = false;
   if (!raw.rules.length) { await backend.insert("rules", SEED_RULES.map(([pattern, category]) => ({ pattern, category })), { onConflict: "pattern" }); wrote = true; }
+  // v5：ATM で引き出した分を入れる費目「現金」（設計書 §3.6）
+  if (!d.settings.varCats.includes("現金")) { await backend.upsertKeyed("settings", [{ data: { ...d.settings, varCats: [...d.settings.varCats, "現金"] } }]); wrote = true; }
 
   const cur = ymOf(today);
   const months = [0, 1, 2, 3, 4, 5].map((k) => addMonths(cur, k));
@@ -304,6 +307,11 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
     const v = computeMonth(d, cur, today);
     const rows = v.cats.filter((c) => c.cat !== RESERVE && c.budget).map((c) => ({ month: cur, category: c.cat, amount: c.budget }));
     if (rows.length) await backend.upsertKeyed("budgets", rows);
+  }
+  // v5：今月の予算を決めていなければ、月の初めの目安額をその月の予算として保存する（あとで見込みが変わっても予算は動かない。設計書 §3.2）
+  if (!wrote && !raw.missing?.includes("v5_months") && !d.v5.months.some((m) => m.month === cur)) {
+    await backend.upsertKeyed("v5_months", [{ month: cur, budget: guideOf(d, cur).amount, source: "guide" }]);
+    return true;
   }
   return wrote;
 }
@@ -588,6 +596,42 @@ export const actions = {
     }
     return `明細・予定 ${json.entries?.length ?? 0}件、残高 ${balances.length}件、定期 ${rec.length}件、目標 ${goals.length}件を取り込みました`;
   },
+};
+
+// ---------- v5（設計書 docs/superpowers/specs/2026-10-23-v5-yoyuugaku-design.md） ----------
+
+export const actions5 = {
+  addLoan: (x: Omit<Loan, "id">, balance: number, date: string) => {
+    const id = newId();
+    return backend.insert("v5_loans", [{ id, ...x }]).then(() => backend.insert("v5_loan_balances", [{ loan_id: id, date, balance }]));
+  },
+  updateLoan: (id: string, patch: Partial<Loan>) => backend.update("v5_loans", id, patch as Row),
+  removeLoan: (id: string) => backend.remove("v5_loans", id),
+  /** 借入残高を直す（カードのサイトで見た額）。前の記録から計算した額との差が「借入残高の修正」になる */
+  setLoanBalance: (loanId: string, date: string, balance: number) => backend.insert("v5_loan_balances", [{ loan_id: loanId, date, balance }]),
+
+  addPlan: (x: Omit<V5Plan, "id">) => { const id = newId(); return backend.insert("v5_plans", [{ id, ...x }]).then(() => id); },
+  updatePlan: (id: string, patch: Partial<V5Plan>) => backend.update("v5_plans", id, patch as Row),
+  removePlan: (id: string) => backend.remove("v5_plans", id),
+  addMove: (m: Omit<PlanMove, "id">) => backend.insert("v5_moves", [m as unknown as Row]),
+  removeMove: (id: string) => backend.remove("v5_moves", id),
+  /** 取崩順を並べ直す（ids の順に 1, 2, 3 …） */
+  async setDrawOrder(ids: string[]) { for (const [i, id] of ids.entries()) await backend.update("v5_plans", id, { draw_order: i + 1 }); },
+
+  /** その月の予算を決める。null なら目安額に戻す（目安額で保存する） */
+  decideBudget: (d: Data, month: string, amount: number | null) =>
+    backend.upsertKeyed("v5_months", [amount == null ? { month, budget: guideOf(d, month).amount, source: "guide" } : { month, budget: amount, source: "decided" }]),
+
+  /** クレカ明細をリボに回す・戻す */
+  toRevolving: (d: Data, e: CardEntry, on: boolean) => backend.update("card_entries", e.id, { ...revolvingPatch(d.settings, e, on), locked: true }),
+  /** 口座明細を費目ごとの行に分ける */
+  async splitAccount(d: Data, e: AccountEntry, parts: { category: string; amount: number }[]) {
+    const r = splitRows(d.settings, e, parts);
+    await backend.update("account_entries", r.update.id, { ...r.update.patch, locked: true });
+    if (r.inserts.length) await backend.insert("account_entries", r.inserts.map((x) => ({ ...x, source: "manual", locked: true })));
+  },
+  /** ATM で引き出した額を、その日に使ったものとして入れる（財布は持たない） */
+  addAtm: (date: string, amount: number) => backend.insert("account_entries", [{ ...atmRow(date, amount), source: "manual", locked: true }]),
 };
 
 export interface NewPlan {

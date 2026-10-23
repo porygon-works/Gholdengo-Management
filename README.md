@@ -85,7 +85,7 @@ Supabase はプロジェクト **porygon-works** に複数のアプリの DB を
 2. GAS の `コード.gs` を新しい `gas/Code.gs` に貼り替えて保存。
 3. 関数 **setup** を選んで **実行**。Google ドライブを使う許可を求められるので許可する（15分ごとの取り込みと、1時間ごとのドライブへの書き出しのトリガーができる）。
 4. アプリを一度開く（開くたびに書き出しを保存する）。数分後、Google ドライブに「Gholdengo/gholdengo-snapshot.json」ができる。
-5. Claude で Google ドライブをつなぐと、いつでも読める。Claude が作った変更（gholdengo-ops-v1）は、アプリの「設定 → データ → Claude との相談を取り込む」で中身を確かめてから実行する。
+5. Claude で Google ドライブをつなぐと、いつでも読める。Claude が作った変更（gholdengo-ops-v2）は、アプリの「設定 → データ → Claude との相談を取り込む」で中身を確かめてから実行する。
 
 ## 開発
 

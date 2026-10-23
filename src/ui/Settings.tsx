@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import {
-  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, computeMonth, GROUP_LABEL_DEFAULTS, groupOfCat, IN_GROUPS, monthBase, planMinusItems, RESERVE, todayJST,
+  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, computeMonth, GROUP_LABEL_DEFAULTS, groupOfCat, IN_GROUPS, monthBudget, RESERVE, todayJST,
   type AccountGroup, type CardDef, type CardGroup, type Recurring, type Settings as S,
 } from "../engine";
-import { actions, type AppData, type ImportFile, type Store } from "../data/store";
+import { actions, actions5, type AppData, type ImportFile, type Store } from "../data/store";
+import { ConfirmChange } from "./Preview";
 import { backend, resetLocal } from "../data/backend";
 import { VERSION_LABEL } from "./version";
-import { applyOps, planOps } from "../data/ops";
+import { applyOps, OPS_FORMAT, planOps, simulateOps } from "../data/ops";
+import { slackValue } from "../engine";
 import { snapshot } from "../data/snapshot";
 import type { Open } from "./Sheets";
 import { Chip, Field, md, money, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
@@ -48,33 +50,30 @@ export function SettingsView({ store, data, month, onOpen }: { store: Store; dat
 
 // ---------- 予算 ----------
 
-/** 予算の出し方（給与 ＋ 追加予算 − 固定費 − 計画の分 ＝ 目安）と、その月に決める予算 */
+/** v5：予算の出し方（給与の見込み − 固定費 − 借入の毎月の返済 − 計画の毎月の積立額 ＝ 目安額）と、その月に決める予算（設計書 §3.1・§3.2） */
 function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; month: string }) {
-  const b = monthBase(data, month);
-  const items = planMinusItems(data, month);
-  const [val, setVal] = useState<number | "">(b.manual ?? "");
-  useEffect(() => setVal(b.manual ?? ""), [month, b.manual]);
-  const save = async (v: number | null) => {
-    if (await store.run(() => actions.saveMonthBudget(month, v))) toast(v == null ? "目安に戻しました" : `${ymLabel(month)}の予算を ${yen(v)}円 にしました`);
-  };
+  const today = todayJST();
+  const mb = monthBudget(data, month);
+  const g = mb.guide;
+  const [val, setVal] = useState<number | "">(mb.source === "decided" ? mb.amount : "");
+  useEffect(() => setVal(mb.source === "decided" ? mb.amount : ""), [month, mb.amount, mb.source]);
+  const [confirm, setConfirm] = useState(false);
+  const back = async () => { if (await store.run(() => actions5.decideBudget(data, month, null))) toast("目安額に戻しました"); };
   return (
     <section>
-      <h2>{ymLabel(month)}の予算 <small>{money(b.T)}</small></h2>
+      <h2>{ymLabel(month)}の予算 <small>{money(mb.amount)}（{mb.source === "decided" ? "決めた額" : mb.source === "guide" ? "月の初めの目安額で決めた" : "目安額"}）</small></h2>
       <div className="panel">
         <table className="tbl">
-          <tbody>
-            <tr><td>給与</td><td className="num">{money(b.salary)}</td></tr>
-            {b.extra !== 0 && <tr><td>＋ 追加予算</td><td className="num">{money(b.extra)}</td></tr>}
-            <tr><td>− 固定費</td><td className="num">{money(b.fixed)}</td></tr>
-            {items.map((x, i) => <tr key={i}><td>− {x.plan.name}：{x.name}</td><td className="num">{money(x.amount)}</td></tr>)}
-          </tbody>
-          <tfoot><tr><td>＝ 目安</td><td className="num">{money(b.auto)}</td></tr></tfoot>
+          <tbody>{g.parts!.map((p, i) => <tr key={p.key}><td>{i ? "− " : ""}{p.label}</td><td className="num">{money(p.amount)}</td></tr>)}</tbody>
+          <tfoot><tr><td>＝ 目安額</td><td className="num">{money(g.amount)}</td></tr></tfoot>
         </table>
-        <Field label="この月の予算" hint={b.manual == null ? "空なら目安をそのまま使います" : `目安より ${signed(b.manual - b.auto)}円`}><NumInput value={val} onChange={setVal} placeholder={yen(b.auto)} /></Field>
-        <div className="btns">
-          <button className="btn" onClick={() => save(val === "" ? null : val)}>決める</button>
-          {b.manual != null && <button className="btn ghost" onClick={() => save(null)}>目安に戻す</button>}
-        </div>
+        <Field label="この月の予算" hint={val === "" ? "空なら目安額を使います" : `目安額より ${signed(Number(val) - g.amount)}円（多い分は余裕額から出す）`}><NumInput value={val} onChange={(v) => { setVal(v); setConfirm(false); }} placeholder={yen(g.amount)} /></Field>
+        {confirm && val !== "" ? <ConfirmChange store={store} data={data} today={today} change={{ kind: "decideBudget", month, amount: val }} label="決める" onDone={() => setConfirm(false)} /> : (
+          <div className="btns">
+            <button className="btn" disabled={val === ""} onClick={() => setConfirm(true)}>決める</button>
+            {mb.source === "decided" && <button className="btn ghost" onClick={back}>目安額に戻す</button>}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -91,7 +90,7 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
   const sumOf = (cs: string[]) => cs.reduce((a, c) => a + (Number(vals[c]) || 0), 0);
   // 入力中の値で、予算と予備を出し直す（固定費を直すと、今月の予算も変わる）
   const fixedSum = sumOf(st.fixCats);
-  const free = v.base.manual ?? v.base.salary + v.base.extra - fixedSum - v.base.plan;
+  const free = monthBudget(data, month).amount;
   const reserve = free - sumOf(st.varCats);
   const own = data.budgets.some((b) => b.month === month && !b.category.startsWith("#") && b.category !== RESERVE);
   const save = async () => {
@@ -111,9 +110,9 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
       <section>
         <h2>費目ごとの予算 <small>{own ? "この月の予算" : "前の月から引き継いでいます"}</small></h2>
         <div className="panel">
-          <h2>固定費 <small>合計 {yen(fixedSum)}円（給与から引く）</small></h2>
+          <h2>固定費 <small>合計 {yen(fixedSum)}円（目安額を出すときに引く）</small></h2>
           <div className="budgetgrid">{grid(st.fixCats)}</div>
-          <div className="note">毎月の見込みの額。予算を入れていない費目は、定期マスタの額を使います。見込みをこえた分は残り予算から引きます。</div>
+          <div className="note">毎月の見込みの額。予算を入れていない費目は、定期マスタの額を使います。見込みをこえた分は予算残額から引きます。</div>
           <h2 style={{ marginTop: 8 }}>変動費 <small>今月の予算 {signed(free)}円 を割り振る</small></h2>
           <div className="budgetgrid">
             {grid(st.varCats)}
@@ -139,7 +138,7 @@ function Income({ store, data, onOpen }: { store: Store; data: AppData; onOpen: 
   const [bDate, setBDate] = useState("");
   const [bAmount, setBAmount] = useState<number | "">("");
   const [bName, setBName] = useState("賞与");
-  const [bGroup, setBGroup] = useState<AccountGroup>("other");
+  const [bGroup, setBGroup] = useState<AccountGroup>("bonus");
   const addBonus = async () => {
     if (!bDate || !bAmount) { toast("日付と金額を入れてください"); return; }
     if (await store.run(() => actions.addAccount({ account: "bank", direction: "in", status: "plan", group: bGroup, category: null, name: bName, date: bDate, amount: bAmount }))) { toast("入金の予定を入れました"); setBDate(""); setBAmount(""); }
@@ -162,7 +161,7 @@ function Income({ store, data, onOpen }: { store: Store; data: AppData; onOpen: 
             <Field label="名称"><input value={bName} onChange={(e) => setBName(e.target.value)} /></Field>
             <Field label="大費目"><Select value={bGroup} options={IN_GROUPS} labels={ACCOUNT_GROUP_LABEL} onChange={setBGroup} /></Field>
           </div>
-          <div className="note">賞与はふつう「その他」（予算に入れない）。名称に「賞与」とあれば、計画をつくるで返済・積立に回せます。</div>
+          <div className="note">賞与は大費目「賞与」。入ると余裕額が増え、計画の「賞与からの配分」で選べます。</div>
           <div className="btns"><button className="btn" onClick={addBonus}>入金の予定を入れる</button></div>
           {extras.length > 0 && <div className="list">{extras.map((e) => (
             <button className="row" key={e.id} onClick={() => onOpen({ type: "account", entry: e })}>
@@ -437,7 +436,7 @@ function Kinds({ store, data }: { store: Store; data: AppData }) {
 
 // ---------- データ ----------
 
-/** Claude との相談を取り込む（gholdengo-ops-v1）。変わる内容を見せて、実行を押したときだけ書く */
+/** Claude との相談を取り込む（gholdengo-ops-v2）。変わる内容を見せて、実行を押したときだけ書く */
 function OpsImport({ store, data }: { store: Store; data: AppData }) {
   const [plan, setPlan] = useState<ReturnType<typeof planOps> | null>(null);
   const [text, setText] = useState("");
@@ -452,16 +451,21 @@ function OpsImport({ store, data }: { store: Store; data: AppData }) {
   };
   return (
     <section>
-      <h2>Claude との相談を取り込む <small>gholdengo-ops-v1（docs/OPS.md）</small></h2>
+      <h2>Claude との相談を取り込む <small>{OPS_FORMAT}（docs/OPS.md）</small></h2>
       <div className="panel">
         <div className="note">Claude が作った JSON を、ファイルか、下に貼りつけて読み込みます。変わる内容を確かめてから「実行」を押してください。</div>
         <Field label="ファイル"><input type="file" accept="application/json,.json" onChange={async (e) => { const f = e.target.files?.[0]; if (f) read(await f.text()); }} /></Field>
-        <Field label="または貼りつける"><textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder='{"format": "gholdengo-ops-v1", "ops": [...]}' /></Field>
+        <Field label="または貼りつける"><textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={`{"format": "${OPS_FORMAT}", "ops": [...]}`} /></Field>
         <div className="btns"><button className="btn ghost" onClick={() => text.trim() && read(text)}>読み込む</button></div>
         {plan && (
           <>
             {plan.note && <div className="note">メモ：{plan.note}</div>}
             {plan.errors.length > 0 && <div className="alert bad">読めないところがあるので取り込みません：<ul>{plan.errors.map((e, i) => <li key={i}>{e}</li>)}</ul></div>}
+            {plan.changes.length > 0 && !plan.errors.length && (() => {
+              const t = todayJST();
+              const a = slackValue(data, t, t), b = slackValue(simulateOps(data, plan.changes), t, t);
+              return <div className="kv"><span>取り込んだら、余裕額</span><b className="num">{money(a)} → <span className={b < 0 ? "neg" : ""}>{money(b)}</span></b></div>;
+            })()}
             {plan.changes.length > 0 && (
               <table className="tbl"><tbody>{plan.changes.map((c, i) => (
                 <tr key={i}><td style={{ textAlign: "left" }}><Chip kind={c.kind === "delete" ? "bad" : c.kind === "add" ? "ok" : "warn"}>{c.kind === "delete" ? "消す" : c.kind === "add" ? "足す" : "直す"}</Chip> {c.label}</td></tr>
