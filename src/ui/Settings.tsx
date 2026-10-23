@@ -68,10 +68,10 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
           <tfoot><tr><td>＝ 目安額</td><td className="num">{money(g.amount)}</td></tr></tfoot>
         </table>
         <Field label="この月の予算" hint={val === "" ? "空なら目安額を使います" : `目安額より ${signed(Number(val) - g.amount)}円（多い分は余裕額から出す）`}><NumInput value={val} onChange={(v) => { setVal(v); setConfirm(false); }} placeholder={yen(g.amount)} /></Field>
-        {confirm && val !== "" ? <ConfirmChange store={store} data={data} today={today} change={{ kind: "decideBudget", month, amount: val }} label="決める" onDone={() => setConfirm(false)} /> : (
+        {confirm && val !== "" ? <ConfirmChange store={store} data={data} today={today} change={{ kind: "decideBudget", month, amount: val }} label="確定" onDone={() => setConfirm(false)} /> : (
           <div className="btns">
-            <button className="btn" disabled={val === ""} onClick={() => setConfirm(true)}>決める</button>
-            {mb.source === "decided" && <button className="btn ghost" onClick={back}>目安額に戻す</button>}
+            <button className="btn" disabled={val === ""} onClick={() => setConfirm(true)}>確定</button>
+            {mb.source === "decided" && <button className="btn ghost" onClick={back}>目安額</button>}
           </div>
         )}
       </div>
@@ -120,7 +120,7 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
             <b className={`num ${reserve < 0 ? "neg" : ""}`} style={{ textAlign: "right" }}>{signed(reserve)}</b>
           </div>
           {reserve < 0 && <div className="alert">今月の予算より {yen(-reserve)}円 多く割り振っています。どこかを減らしてください。</div>}
-          <div className="btns"><button className="btn" onClick={save}>この月の費目予算を保存</button></div>
+          <div className="btns"><button className="btn" onClick={save}>保存</button></div>
           <div className="note">保存しない月は、前の月の費目予算をそのまま使います。Claude と相談して決めた予算は、JSON にして「データ」から取り込めます。</div>
         </div>
       </section>

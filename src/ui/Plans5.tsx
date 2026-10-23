@@ -13,7 +13,7 @@ const KIND5: Record<PlanKind, string> = { ...PLAN_KIND_LABEL, buy: "購入" };
 function LoanSheet({ store, data, today, loan, onClose }: { store: Store; data: AppData; today: string; loan?: Loan; onClose: () => void }) {
   const s = data.settings;
   const [name, setName] = useState(loan?.name ?? "");
-  const [card, setCard] = useState<string>(loan?.card ?? s.cards.find((c) => c.id === "saison")?.id ?? "");
+  const [card, setCard] = useState<string>(loan?.card ?? s.cards[0]?.id ?? "");
   const [payDay, setPayDay] = useState<number | "">(loan?.pay_day ?? 27);
   const [monthly, setMonthly] = useState<number | "">(loan?.monthly ?? "");
   const [balance, setBalance] = useState<number | "">("");
@@ -28,15 +28,15 @@ function LoanSheet({ store, data, today, loan, onClose }: { store: Store; data: 
   };
   const remove = async () => { if (loan && confirm("この借入を消しますか？") && (await store.run(() => actions5.removeLoan(loan.id)))) onClose(); };
   return (
-    <Sheet title={loan ? loan.name : "借入を足す"} onClose={onClose}>
-      <Field label="返す先"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="セゾンのリボ" /></Field>
+    <Sheet title={loan ? loan.name : "新規借入"} onClose={onClose}>
+      <Field label="返す先"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="カード名のリボ" /></Field>
       <div className="grid2">
-        <Field label="返し方"><Select value={card} options={["", ...s.cards.map((c) => c.id)]} labels={{ "": "口座から", ...Object.fromEntries(s.cards.map((c) => [c.id, `${c.name}の請求と一緒`])) }} onChange={setCard} /></Field>
+        <Field label="返済方法" hint={card ? "カードの請求と一緒に引き落とされる" : "口座から引き落とされる"}><Select value={card} options={[...s.cards.map((c) => c.id), ""]} labels={{ "": "口座", ...Object.fromEntries(s.cards.map((c) => [c.id, c.name])) }} onChange={setCard} /></Field>
         {!card && <Field label="返済日"><NumInput plain value={payDay} onChange={setPayDay} /></Field>}
         <Field label="毎月の返済額"><NumInput value={monthly} onChange={setMonthly} /></Field>
-        <Field label={loan ? "借入残高を直す（今日の額）" : "いまの借入残高"} hint={loan ? "カードのサイトで見た額。前の記録との差は「借入残高の修正」になります" : undefined}><NumInput value={balance} onChange={setBalance} /></Field>
+        <Field label={loan ? "借入残高（今日・更新するときだけ）" : "借入残高（今日）"} hint={loan ? "カードのサイトの額。前の記録との差は「借入残高の修正」" : undefined}><NumInput value={balance} onChange={setBalance} /></Field>
       </div>
-      <div className="btns"><button className="btn" onClick={save}>保存</button><button className="btn ghost" onClick={onClose}>やめる</button>{loan && <button className="btn danger" onClick={remove}>消す</button>}</div>
+      <div className="btns"><button className="btn" onClick={save}>保存</button><button className="btn ghost" onClick={onClose}>取消</button>{loan && <button className="btn danger" onClick={remove}>削除</button>}</div>
     </Sheet>
   );
 }
@@ -74,7 +74,7 @@ function PlanSheet({ store, data, today, plan, onClose }: { store: Store; data: 
   const moves = plan ? data.v5.moves.filter((m) => m.plan_id === plan.id) : [];
 
   return (
-    <Sheet title={plan ? plan.name : "計画を足す"} onClose={onClose}>
+    <Sheet title={plan ? plan.name : "新規計画"} onClose={onClose}>
       {!plan && <div className="seg" role="group" aria-label="種類">{KINDS.map((k) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}>{KIND5[k]}</button>)}</div>}
       <Field label="名前"><input value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === "repay" ? "リボを12月に返す" : kind === "buy" ? "大きい買い物" : "生活費1か月分"} /></Field>
       <div className="grid2">
@@ -88,13 +88,13 @@ function PlanSheet({ store, data, today, plan, onClose }: { store: Store; data: 
           <div>{data.v5.loans.map((l) => <label key={l.id} className="check"><input type="checkbox" checked={loans.includes(l.id)} onChange={(e) => setLoans(e.target.checked ? [...loans, l.id] : loans.filter((x) => x !== l.id))} />{l.name}</label>)}</div>
         </Field>
       )}
-      <div className="btns"><button className="btn" onClick={save}>保存</button>{plan && <button className="btn ghost" onClick={() => store.run(() => actions5.updatePlan(plan.id, { done: !plan.done }))}>{plan.done ? "終わったを外す" : "終わった"}</button>}{plan && <button className="btn danger" onClick={remove}>消す</button>}</div>
+      <div className="btns"><button className="btn" onClick={save}>保存</button>{plan && <button className="btn ghost" onClick={() => store.run(() => actions5.updatePlan(plan.id, { done: !plan.done }))}>{plan.done ? "完了解除" : "完了"}</button>}{plan && <button className="btn danger" onClick={remove}>削除</button>}</div>
 
       {plan && kind !== "repay" && (
         <>
-          <h2>お金を入れる・出す</h2>
+          <h2>入出金</h2>
           <div className="seg" role="group" aria-label="出し入れ">
-            {(["manual", "bonus", "draw"] as const).map((k) => <button key={k} type="button" aria-pressed={move === k} onClick={() => setMove(k)}>{{ manual: "余裕額から入れる", bonus: "賞与からの配分", draw: "取り崩す" }[k]}</button>)}
+            {(["manual", "bonus", "draw"] as const).map((k) => <button key={k} type="button" aria-pressed={move === k} onClick={() => setMove(k)}>{{ manual: "積立追加", bonus: "賞与配分", draw: "取崩" }[k]}</button>)}
           </div>
           {move && (
             <div className="grid2">
@@ -102,14 +102,14 @@ function PlanSheet({ store, data, today, plan, onClose }: { store: Store; data: 
               <Field label="額"><NumInput value={amount} onChange={setAmount} /></Field>
             </div>
           )}
-          {moveChange && (move !== "bonus" || bonusId) && <ConfirmChange store={store} data={data} today={today} change={moveChange} label="入れる" onDone={() => { setAmount(""); setMove(""); }} />}
+          {moveChange && (move !== "bonus" || bonusId) && <ConfirmChange store={store} data={data} today={today} change={moveChange} label="確定" onDone={() => { setAmount(""); setMove(""); }} />}
           {moves.length > 0 && (
             <div className="panel"><div className="list">
               {moves.map((m) => (
                 <div key={m.id} className="row" style={{ cursor: "default" }}>
                   <span className="d num">{md(m.date)}</span>
-                  <span className="t"><div>{{ manual: "余裕額から", bonus: "賞与からの配分", draw: "取り崩し", spend: "購入" }[m.kind]} {m.memo}</div></span>
-                  <span className="a num">{m.kind === "draw" || m.kind === "spend" ? "−" : ""}{money(m.amount)} <button className="btn sm ghost" onClick={() => store.run(() => actions5.removeMove(m.id))}>消す</button></span>
+                  <span className="t"><div>{{ manual: "積立追加", bonus: "賞与配分", draw: "取崩", spend: "購入" }[m.kind]} {m.memo}</div></span>
+                  <span className="a num">{m.kind === "draw" || m.kind === "spend" ? "−" : ""}{money(m.amount)} <button className="btn sm ghost" onClick={() => store.run(() => actions5.removeMove(m.id))}>削除</button></span>
                 </div>
               ))}
             </div></div>
@@ -131,60 +131,57 @@ export function Plans5({ store, data, today, openPart }: { store: Store; data: A
   return (
     <>
       <section>
-        <h2>借入 <button className="lnk" onClick={() => setLoanSheet("new")}>＋ 足す</button></h2>
-        <div className="panel"><div className="list">
-          {data.v5.loans.map((l) => {
-            const p = loanAt(data, l, today);
-            const fixes = loanCorrections(data, l);
-            return (
-              <div key={l.id} className="row" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-                <span className="t"><div><button className="lnk" onClick={() => setLoanSheet(l)}>{l.name}</button></div><div>{l.card ? `${cardOf(data.settings, l.card).name}の請求と一緒` : `口座から毎月${l.pay_day}日`}・毎月 {money(l.monthly)}{fixes.length ? `・借入残高の修正 ${fixes.length}件` : ""}</div></span>
-                <span className="a"><PartNum part={fixes.length ? { ...p, rows: fixes } : p} open={openPart} /></span>
-              </div>
-            );
-          })}
-          {!data.v5.loans.length && <div className="note">リボなどの借入を足すと、余裕額に入ります</div>}
-        </div></div>
+        <div className="sec-h"><h2>借入</h2><button className="btn sm" onClick={() => setLoanSheet("new")}>新規借入</button></div>
+        {data.v5.loans.map((l) => {
+          const p = loanAt(data, l, today);
+          const fixes = loanCorrections(data, l);
+          return (
+            <div key={l.id} className="pcard" onClick={() => setLoanSheet(l)} role="button" tabIndex={0}>
+              <div className="top"><span className="nm">{l.name}</span><span onClick={(e) => e.stopPropagation()}><PartNum part={fixes.length ? { ...p, rows: fixes } : p} open={openPart} /></span></div>
+              <div className="meta">{l.card ? cardOf(data.settings, l.card).name : "口座"}・毎月 {money(l.monthly)}{fixes.length ? `・借入残高の修正 ${fixes.length}件` : ""}</div>
+            </div>
+          );
+        })}
+        {!data.v5.loans.length && <div className="empty">借入（リボなど）はありません</div>}
       </section>
 
       <section>
-        <h2>計画 <button className="lnk" onClick={() => setPlanSheet("new")}>＋ 足す</button></h2>
-        <div className="panel"><div className="list">
-          {plans.map((p) => {
-            if (p.kind === "repay") {
-              const v = views.get(p.id);
-              return (
-                <div key={p.id} className="row" style={{ gridTemplateColumns: "1fr", cursor: "default" }}>
-                  <span className="t"><div><Chip>{KIND5[p.kind]}</Chip> <button className="lnk" onClick={() => setPlanSheet(p)}>{p.name}</button>{p.done && <Chip>終わった</Chip>}</div>{p.due_date && <div>期日 {md(p.due_date)}</div>}</span>
-                  {v && (
-                    <div>
-                      <div className="kv"><span>返す額の見込み</span><PartNum part={v.due} open={openPart} /></div>
-                      <div className="kv"><span>{v.bankThen.label} <Chip kind={v.ok ? "ok" : "bad"}>{v.ok ? "返せる" : "足りない"}</Chip></span><PartNum part={v.bankThen} open={openPart} /></div>
-                      <div className="kv"><span>返した後の余裕額</span><PartNum part={v.slackAfter} open={openPart} /></div>
-                    </div>
-                  )}
-                </div>
-              );
-            }
-            const now = savedAt(data, p, today);
-            const end = savedAt(data, p, p.due_date ?? `${addMonths(ymOf(today), 12)}-01`, true);
-            const ok = !p.target || end.amount >= p.target;
-            const pb = plannedBonus(data, p);
+        <div className="sec-h"><h2>計画</h2><button className="btn sm" onClick={() => setPlanSheet("new")}>新規計画</button></div>
+        {plans.map((p) => {
+          if (p.kind === "repay") {
+            const v = views.get(p.id);
             return (
-              <div key={p.id} className="row" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-                <span className="t"><div><Chip>{KIND5[p.kind]}</Chip> <button className="lnk" onClick={() => setPlanSheet(p)}>{p.name}</button> {p.done ? <Chip>終わった</Chip> : p.target ? <Chip kind={ok ? "ok" : "bad"}>{ok ? "そろう" : "足りない"}</Chip> : null}{p.no_draw && <Chip>取崩不可</Chip>}</div>
-                  <div>目標額 {money(p.target)}{p.due_date ? `・期日 ${md(p.due_date)}` : ""}{p.monthly ? `・毎月 ${money(p.monthly)}` : ""}{pb.length ? `・配分の予定 ${money(pb.reduce((a, r) => a + r.amount, 0))}` : ""}</div></span>
-                <span className="a">積立額 <PartNum part={now} open={openPart} /></span>
+              <div key={p.id} className="pcard" onClick={() => setPlanSheet(p)} role="button" tabIndex={0}>
+                <div className="top"><span className="nm"><Chip>{KIND5[p.kind]}</Chip> {p.name}</span>{v && <Chip kind={v.ok ? "ok" : "bad"}>{v.ok ? "返済可" : "残高不足"}</Chip>}</div>
+                <div className="meta">期日 {p.due_date ? md(p.due_date) : "―"}{p.done ? "・完了" : ""}</div>
+                {v && (
+                  <div className="stat3" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => openPart(v.due)}><span className="k">返済額</span><span className="n">{money(v.due.amount)}</span></button>
+                    <button onClick={() => openPart(v.bankThen)}><span className="k">期日の口座残高</span><span className="n">{money(v.bankThen.amount)}</span></button>
+                    <button onClick={() => openPart(v.slackAfter)}><span className="k">返済後の余裕額</span><span className={`n ${v.slackAfter.amount < 0 ? "neg" : ""}`}>{money(v.slackAfter.amount)}</span></button>
+                  </div>
+                )}
               </div>
             );
-          })}
-          {!plans.length && <div className="note">生活費1か月分（貯蓄）・リボをまとめて返す（返済）・大きい買い物（購入）を作れます</div>}
-        </div></div>
+          }
+          const now = savedAt(data, p, today);
+          const end = savedAt(data, p, p.due_date ?? `${addMonths(ymOf(today), 12)}-01`, true);
+          const ok = !p.target || end.amount >= p.target;
+          const pb = plannedBonus(data, p);
+          return (
+            <div key={p.id} className="pcard" onClick={() => setPlanSheet(p)} role="button" tabIndex={0}>
+              <div className="top"><span className="nm"><Chip>{KIND5[p.kind]}</Chip> {p.name}</span><span onClick={(e) => e.stopPropagation()}><PartNum part={now} open={openPart} /></span></div>
+              <span className="meter"><i style={{ width: `${p.target ? Math.min(100, (now.amount / p.target) * 100) : 0}%` }} /></span>
+              <div className="meta">目標額 {money(p.target)}{p.done ? "・完了" : p.target ? (ok ? "・達成見込" : "・不足見込") : ""}{p.due_date ? `・期日 ${md(p.due_date)}` : ""}{p.monthly ? `・毎月 ${money(p.monthly)}` : ""}{pb.length ? `・賞与配分（予定） ${money(pb.reduce((a, r) => a + r.amount, 0))}` : ""}{p.no_draw ? "・取崩不可" : ""}</div>
+            </div>
+          );
+        })}
+        {!plans.length && <div className="empty">計画はありません（貯蓄・購入・返済）</div>}
       </section>
 
       {drawable.length > 0 && (
         <section>
-          <h2>取崩順 <small>余裕額がマイナスのとき、上から確保額を差し引く</small></h2>
+          <h2>取崩順 <small>余裕額がマイナスのとき上から取崩</small></h2>
           <div className="panel"><div className="list">
             {drawable.map((p, i) => (
               <div key={p.id} className="row" style={{ gridTemplateColumns: "auto 1fr auto", cursor: "default" }}>

@@ -40,11 +40,13 @@ export function Ledger5({ data, month, today, focusCat, onOpen, onAdd }: { data:
           <button role="tab" aria-pressed={kind === "card"} onClick={() => setKind("card")}>クレカ明細</button>
           <button role="tab" aria-pressed={kind === "account"} onClick={() => setKind("account")}>口座明細</button>
         </div>
-        <div className="seg" role="tablist" aria-label="並べ方">
-          <button role="tab" aria-pressed={view === "cat"} onClick={() => setView("cat")}>費目ごと</button>
-          <button role="tab" aria-pressed={view === "time"} onClick={() => setView("time")}>日付ごと</button>
+        <div className="sec-h">
+          <div className="seg" role="tablist" aria-label="並べ方">
+            <button role="tab" aria-pressed={view === "cat"} onClick={() => setView("cat")}>費目別</button>
+            <button role="tab" aria-pressed={view === "time"} onClick={() => setView("time")}>日付別</button>
+          </div>
+          <button className="btn sm" onClick={onAdd}>新規入力</button>
         </div>
-        <div className="btns"><button className="btn" onClick={onAdd}>追加</button></div>
       </section>
       {!rows.length ? <Empty>この月の{kind === "card" ? "クレカ明細" : "口座明細"}はまだありません</Empty> : groups.map((g) => {
         const items = rows.filter((e) => (view === "cat" ? keyOf(e) : e.date) === g);
@@ -56,7 +58,7 @@ export function Ledger5({ data, month, today, focusCat, onOpen, onAdd }: { data:
               <span className="n">{view === "cat" ? g : `${md(g)}（${wday(g)}）`} {cat && <Chip kind={cat.over ? "bad" : "ok"}>{cat.over ? `超過 ${yen(-cat.left)}` : `残り ${yen(cat.left)}`}</Chip>}</span>
               <span className="s num">{money(items.reduce((a, e) => a + amountOf(e), 0))}{cat ? ` / 予算 ${money(cat.budget)}` : ""}</span>
             </button>
-            {isOpen ? <div className="list">{items.map(row)}</div> : <div className="note">{items.length}件・タップで開く</div>}
+            {isOpen ? <div className="list">{items.map(row)}</div> : <div className="note">{items.length}件 ›</div>}
           </div>
         );
       })}

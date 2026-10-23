@@ -21,7 +21,7 @@ export function CompareBox({ c }: { c: Comparison }) {
     <div className="panel">
       <div className="kv"><span>余裕額</span><b className="num">{money(s0)} → <span className={s1 < 0 ? "neg" : ""}>{money(s1)}</span></b></div>
       <div className="kv"><span>{+c.budget.month.slice(5)}月の予算残額</span><b className="num">{money(c.budget.before)} → <span className={c.budget.after < 0 ? "neg" : ""}>{money(c.budget.after)}</span></b></div>
-      <div className="kv"><span>口座残高が一番少なくなる日</span><b className={`num ${c.lowest.bank < 0 ? "neg" : ""}`}>{md(c.lowest.date)} {money(c.lowest.bank)}</b></div>
+      <div className="kv"><span>口座残高の最低</span><b className={`num ${c.lowest.bank < 0 ? "neg" : ""}`}>{md(c.lowest.date)} {money(c.lowest.bank)}</b></div>
     </div>
   );
 }
@@ -62,8 +62,8 @@ export function PlanPreview({ store, data, today, change }: { store: Store; data
   return (
     <>
       <CompareBox c={c} />
-      <div className="alert">足りない {money(c.shortBudget)} を余裕額から{+month.slice(5)}月の予算に足しますか？ <button className="btn sm" onClick={() => setAdd(true)}>足す</button></div>
-      {add && <ConfirmChange store={store} data={data} today={today} change={{ kind: "decideBudget", month, amount: budget + c.shortBudget }} label={`${+month.slice(5)}月の予算に足す`} onDone={() => setAdd(false)} />}
+      <div className="alert">{+month.slice(5)}月の予算が {money(c.shortBudget)} 不足。余裕額から予算に追加できます。 <button className="btn sm" onClick={() => setAdd(true)}>予算追加</button></div>
+      {add && <ConfirmChange store={store} data={data} today={today} change={{ kind: "decideBudget", month, amount: budget + c.shortBudget }} label="予算追加" onDone={() => setAdd(false)} />}
     </>
   );
 }

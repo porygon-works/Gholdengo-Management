@@ -26,18 +26,18 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
       </div>
       <div className="note">{now ? `${md(now.base.date)}に入れた残高に、そのあとの確定した口座明細を足し引きした額です。クレカで使ったものは、引落日に「クレカ支払い」で口座から減ります。` : "まだ残高がありません。下で入れてください。"}</div>
 
-      <h2>残高を直す <small>通帳やアプリを見て、本当の額を入れる</small></h2>
+      <h2>残高更新 <small>通帳・アプリの額</small></h2>
       <div className="grid2">
         <Field label="口座の本当の残高"><NumInput value={bank} onChange={setBank} /></Field>
-        <div className="btns"><button className="btn sm" onClick={() => fix("bank", bank)}>口座を直す</button></div>
+        <div className="btns"><button className="btn sm" onClick={() => fix("bank", bank)}>更新</button></div>
       </div>
 
-      <h2>ATMで引き出した <small>引き出した額を、その日に使ったもの（費目「現金」）にする</small></h2>
+      <h2>現金（ATM） <small>引き出した額をその日の支出（費目「現金」）にする</small></h2>
       <div className="grid2">
         <Field label="日付"><input type="date" value={atmDate} onChange={(e) => setAtmDate(e.target.value)} /></Field>
         <Field label="額"><NumInput value={atm} onChange={setAtm} /></Field>
       </div>
-      <div className="btns"><button className="btn sm" onClick={addAtm}>入れる</button></div>
+      <div className="btns"><button className="btn sm" onClick={addAtm}>入力</button></div>
 
       {now && now.rows.length > 0 && (
         <>
@@ -58,7 +58,7 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
             <tr key={b.id}>
               <td className="num">{md(b.date)}</td>
               <td style={{ textAlign: "left" }}>口座 {yen(b.bank)}{b.memo && <div className="note">{b.memo}</div>}</td>
-              <td><button className="btn sm danger" onClick={async () => { if (confirm("この記録を消しますか？")) await store.run(() => actions.deleteBalance(b.id)); }}>消す</button></td>
+              <td><button className="btn sm danger" onClick={async () => { if (confirm("この記録を消しますか？")) await store.run(() => actions.deleteBalance(b.id)); }}>削除</button></td>
             </tr>
           ))}</tbody></table>
         </>

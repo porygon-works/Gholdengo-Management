@@ -1,15 +1,16 @@
 import { useMemo, useState } from "react";
-import { budgetCats, budgetView, drawPlan, groupOfCat, isLive, RESERVE, slackAt, type Part } from "../engine";
+import { addDays, budgetCats, budgetView, drawPlan, groupOfCat, isLive, lastDay, outlook, RESERVE, slackAt, slackOn, type Part } from "../engine";
 import { actions, actions5, type AppData, type Store } from "../data/store";
 import { Bar, cardOfPay, cardTitle, accountTitle, Chip, Field, md, money, NumInput, Select, toast, yen } from "./common";
-import { PartNum, type OpenPart } from "./Parts";
+import type { OpenPart } from "./Parts";
 import type { Open } from "./Sheets";
 
 // v5 のホーム（設計書 §4.2）：予算残額・費目別残額・最近の明細・余裕額・使ったものを入れる
 
 type Pay5 = string;
+// 払い方は設定のカード（あとから足せる）と PayPay・口座・現金（ATM で引き出した額。設計書 §3.6・§6.1）
 const payOptions5 = (d: AppData): Pay5[] => [...d.settings.cards.map((c) => `card:${c.id}`), "paypay", "bank", "atm"];
-const payLabels5 = (d: AppData): Record<Pay5, string> => ({ ...Object.fromEntries(d.settings.cards.map((c) => [`card:${c.id}`, `クレカ（${c.name}）`])), paypay: "PayPay", bank: "口座", atm: "ATM で引き出した" });
+const payLabels5 = (d: AppData): Record<Pay5, string> => ({ ...Object.fromEntries(d.settings.cards.map((c) => [`card:${c.id}`, c.name])), paypay: "PayPay", bank: "口座", atm: "現金" });
 
 /** 使ったものを入れる。クレカはクレカ明細、PayPay・口座は口座明細、ATM は費目「現金」の口座の出金 */
 function QuickForm5({ store, data, today }: { store: Store; data: AppData; today: string }) {
@@ -28,7 +29,7 @@ function QuickForm5({ store, data, today }: { store: Store; data: AppData; today
     const ok = await store.run(() => pay === "atm" ? actions5.addAtm(date, amount)
       : card ? actions.addCard({ card, status: "confirmed", date, amount, group, category: cat, name, shop: "" })
       : actions.addAccount({ account: "bank", direction: "out", status: "confirmed", group, category: cat, name: name || (pay === "paypay" ? "PayPayチャージ" : ""), date, amount }));
-    if (ok) { toast(pay === "atm" ? `現金 ${yen(amount)}円を入れました` : `${cat} ${yen(amount)}円を入れました`); setAmount(""); setName(""); setDate(today); setMore(false); }
+    if (ok) { toast(`${pay === "atm" ? "現金" : cat} ${yen(amount)}円を入力しました`); setAmount(""); setName(""); setDate(today); setMore(false); }
   };
   return (
     <div className="panel quick">
@@ -41,14 +42,29 @@ function QuickForm5({ store, data, today }: { store: Store; data: AppData; today
       </div>
       {more && <div className="grid2"><Field label="日付"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field><Field label="名称"><input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>}
       <div className="btns">
-        <button className="btn" onClick={add}>入れる</button>
-        {!more && <button className="btn ghost" onClick={() => setMore(true)}>日付・名称も入れる</button>}
+        <button className="btn" onClick={add}>入力</button>
+        {!more && <button className="btn ghost" onClick={() => setMore(true)}>詳細</button>}
       </div>
     </div>
   );
 }
 
 const MAIL = new Set(["card_flash", "card_statement"]);
+const pct = (x: number, of: number) => (of > 0 ? Math.max(0, Math.min(100, (x / of) * 100)) : 0);
+
+/** 余裕額の先の動き（小さい線。0 の線つき） */
+function Spark({ days }: { days: { slack: number }[] }) {
+  if (days.length < 2) return <svg className="spark" />;
+  const W = 160, H = 34, vs = days.map((x) => x.slack), lo = Math.min(0, ...vs), hi = Math.max(0, ...vs) || 1;
+  const x = (k: number) => (W * k) / (days.length - 1), y = (v: number) => 3 + ((H - 6) * (hi - v)) / (hi - lo || 1);
+  const d = vs.map((v, k) => `${k ? "L" : "M"}${x(k).toFixed(1)} ${y(v).toFixed(1)}`).join("");
+  return (
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+      <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="var(--line)" strokeDasharray="3 3" />
+      <path d={d} fill="none" stroke="var(--gold)" strokeWidth={2.2} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
   store: Store; data: AppData; today: string; reviews: number; openPart: OpenPart; onOpen: (o: Open) => void;
@@ -61,8 +77,16 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
   // 使いすぎで余裕額がマイナスになった分（借入残高のせいのマイナスは崩さない。設計書 §3.5）
   const over = Math.max(0, -(slack.amount + loans));
   const draws = over ? drawPlan(data, over, today) : [];
-  const budgetPart: Part = { key: "budget", label: "今月の予算", amount: v.budget, sign: 1, parts: [v.guide] };
+  // 予算残額の内訳の「予算」から、目安額の式までたどれるようにする
+  const leftPart: Part = { ...v.left, parts: v.left.parts!.map((p) => (p.key === "budget" ? { ...p, label: v.source === "decided" ? "予算（決定額）" : "予算（目安額）", parts: v.guide.parts } : p)) };
   const vars = v.cats.filter((c) => !c.fixed && (c.budget || c.used || c.planned));
+  const varCats = v.cats.filter((c) => !c.fixed);
+  const used = varCats.reduce((a, c) => a + c.used, 0), planned = varCats.reduce((a, c) => a + c.planned, 0);
+  const daysLeft = lastDay(ym) - +today.slice(8) + 1;
+  // 余裕額の先の動き（60日）と、返済の計画があれば返したあとの見込み
+  const days = useMemo(() => (data.balances.length ? outlook(data, today, today, addDays(today, 60)) : []), [data, today]);
+  const repay = data.v5.plans.filter((p) => p.kind === "repay" && !p.done && p.due_date && p.due_date >= today).sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0];
+  const ahead = useMemo(() => (repay ? { label: `返済後（${md(repay.due_date!)}）`, amount: slackOn(data, repay.due_date!, today).amount } : days.length ? { label: "60日後", amount: days[days.length - 1].slack } : null), [data, today, repay, days]);
   const recent = useMemo(() => [
     ...data.cards.filter((e) => isLive(e) && e.status === "confirmed" && e.date <= today).map((e) => ({ date: e.date, at: e.at ?? "", key: e.id, title: cardTitle(e), amount: -e.amount, mail: MAIL.has(e.source), open: () => onOpen({ type: "card", entry: e }) })),
     ...data.accounts.filter((e) => e.account === "bank" && e.status === "confirmed" && e.date <= today && e.group !== "card").map((e) => ({ date: e.date, at: e.at ?? "", key: e.id, title: accountTitle(e), amount: e.direction === "in" ? e.amount : -e.amount, mail: false, open: () => onOpen({ type: "account", entry: e }) })),
@@ -76,26 +100,27 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
 
   return (
     <>
-      {reviews > 0 && <button className="alert" onClick={() => go("review")} style={{ marginBottom: 16 }}>確認してほしいことが {reviews} 件あります（重複の候補など）。タップで開く</button>}
+      {reviews > 0 && <button className="alert" onClick={() => go("review")} style={{ marginBottom: 16 }}>要確認 {reviews} 件（重複の候補など）</button>}
       {data.missing.some((t) => t.startsWith("v5_")) && <div className="alert bad" style={{ marginBottom: 16 }}>Supabase の SQL Editor で supabase/migrations/0008_v5.sql を実行してください。</div>}
 
-      <section>
-        <div className="cards">
-          <div className={`kpi ${v.left.amount < 0 ? "bad" : "main"}`}>
-            <div className="lb">今月の予算残額</div>
-            <div className="v"><PartNum part={v.left} open={openPart} big /></div>
-            <div className="note" style={{ color: "inherit", opacity: .85 }}>予算 <PartNum part={budgetPart} open={openPart} /></div>
-          </div>
-          <div className={`kpi ${slack.amount < 0 ? "bad" : ""}`}>
-            <div className="lb">余裕額</div>
-            <div className="v"><PartNum part={slack} open={openPart} /></div>
-            {over > 0 && draws.length > 0 && <button className="btn sm" onClick={applyDraw}>確保額から差し引く（{draws.map((x) => `${x.plan.name} ${money(x.amount)}`).join("・")}）</button>}
-          </div>
-        </div>
+      <section className="hero">
+        <button className={`tile ${v.left.amount < 0 ? "neg" : ""}`} onClick={() => openPart(leftPart)} aria-label="予算残額の内訳">
+          <span className="lb">予算残額</span>
+          <span className="v">{money(v.left.amount)}</span>
+          <span className={`meter ${v.left.amount < 0 ? "over" : ""}`}><i style={{ width: `${pct(used, v.budget)}%` }} /><i className="p" style={{ width: `${pct(planned, v.budget)}%` }} /></span>
+          <span className="sub2"><span>予算 <b>{money(v.budget)}</b></span><span>残り{daysLeft}日{v.left.amount > 0 && daysLeft ? `・1日 ${money(Math.floor(v.left.amount / daysLeft))}` : ""}</span></span>
+        </button>
+        <button className={`tile slack ${slack.amount < 0 ? "neg" : ""}`} onClick={() => openPart(slack)} aria-label="余裕額の内訳">
+          <span className="lb">余裕額</span>
+          <span className="v">{money(slack.amount)}</span>
+          <Spark days={days} />
+          <span className="sub2">{ahead ? <span>{ahead.label} <b className={ahead.amount < 0 ? "neg" : ""}>{money(ahead.amount)}</b></span> : <span />}</span>
+        </button>
       </section>
+      {over > 0 && draws.length > 0 && <div className="alert">使いすぎで余裕額がマイナスです。<button className="btn sm" onClick={applyDraw}>確保額から取崩（{draws.map((x) => `${x.plan.name} ${money(x.amount)}`).join("・")}）</button></div>}
 
       <section>
-        <h2>費目別残額 <button className="lnk" onClick={() => go("ledger")}>明細</button></h2>
+        <div className="sec-h"><h2>費目別残額</h2><button className="btn sm ghost" onClick={() => go("ledger")}>明細</button></div>
         <div className="panel">
           {vars.map((r) => (
             <button key={r.cat} className="crow" onClick={() => go("ledger", r.cat)}>
@@ -113,18 +138,18 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
       </section>
 
       <section>
-        <h2>使ったものを入れる</h2>
+        <h2>支出入力</h2>
         <QuickForm5 store={store} data={data} today={today} />
       </section>
 
       <section>
-        <h2>最近の明細</h2>
+        <h2>最新明細</h2>
         <div className="panel"><div className="list">
           {recent.map((r) => (
             <button key={r.key} className="row" onClick={r.open}>
               <span className="d num">{md(r.date)}</span>
               <span className="t"><div>{r.title} {r.mail && <Chip kind="ok">メール</Chip>}</div></span>
-              <span className={`a num ${r.amount > 0 ? "pos" : ""}`}>{r.amount > 0 ? "＋" : ""}{yen(Math.abs(r.amount))}</span>
+              <span className={`a num ${r.amount > 0 ? "pos" : ""}`}>{r.amount > 0 ? "＋" : "−"}{yen(Math.abs(r.amount))}</span>
             </button>
           ))}
           {!recent.length && <div className="note">明細はまだありません</div>}

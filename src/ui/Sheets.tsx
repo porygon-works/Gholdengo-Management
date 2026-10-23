@@ -77,7 +77,7 @@ export function CardSheet({ store, data, entry, preset, onClose, switcher }: { s
   const unmerge = async (id: string) => { if (await store.run(() => actions.unmerge(data, id))) { toast("まとめを取り消しました"); onClose(); } };
 
   return (
-    <Sheet title={entry ? `${md(entry.date)} ${cardTitle(entry)}` : status === "plan" ? "クレカの予定を入れる" : "クレカで使ったものを入れる"} onClose={onClose}>
+    <Sheet title={entry ? `${md(entry.date)} ${cardTitle(entry)}` : status === "plan" ? "クレカ予定入力" : "クレカ明細入力"} onClose={onClose}>
       {switcher}
       {entry && <div className="note"><StatusChip status={entry.status} /> {CARD_SOURCE_LABEL[entry.source]}から{keeper && <><br />「{md(keeper.date)} {cardTitle(keeper)}」にまとめられています。計算には入っていません。</>}</div>}
       <div className="seg" role="group" aria-label="確定区分">
@@ -113,9 +113,9 @@ export function CardSheet({ store, data, entry, preset, onClose, switcher }: { s
       {!entry && amount && date ? <PlanPreview store={store} data={data} today={todayJST()} change={{ kind: "addCard", entry: { ...base, card, status, date, amount, group, category: cat === UNC ? null : cat, name, shop, memo, tatekae: Number(tatekae) || 0, source: "manual", locked: true } }} /> : null}
       <div className="btns">
         <button className="btn" onClick={save}>保存</button>
-        <button className="btn ghost" onClick={onClose}>やめる</button>
-        {entry && <button className="btn danger" onClick={remove}>消す</button>}
-        {keeper && <button className="btn ghost" onClick={() => unmerge(entry!.id)}>まとめを取り消す</button>}
+        <button className="btn ghost" onClick={onClose}>取消</button>
+        {entry && <button className="btn danger" onClick={remove}>削除</button>}
+        {keeper && <button className="btn ghost" onClick={() => unmerge(entry!.id)}>統合解除</button>}
       </div>
       {entry && !keeper && <CardV5 store={store} data={data} entry={entry} onClose={onClose} />}
       {absorbed.length > 0 && (
@@ -125,7 +125,7 @@ export function CardSheet({ store, data, entry, preset, onClose, switcher }: { s
             <div key={a.id} className="row merged" style={{ cursor: "default" }}>
               <span className="d num">{md(a.date)}</span>
               <span className="t"><div>{cardTitle(a)}</div><div>{CARD_SOURCE_LABEL[a.source]}</div></span>
-              <span className="a num">{yen(a.amount)}<button className="btn sm ghost" style={{ marginLeft: 8 }} onClick={() => unmerge(a.id)}>取り消す</button></span>
+              <span className="a num">{yen(a.amount)}<button className="btn sm ghost" style={{ marginLeft: 8 }} onClick={() => unmerge(a.id)}>解除</button></span>
             </div>
           ))}</div>
         </div>
@@ -173,7 +173,7 @@ function AccountForm({ store, data, entry, preset, onClose, switcher }: { store:
   };
 
   return (
-    <Sheet title={entry ? `${md(entry.date)} ${accountTitle(entry)}` : status === "plan" ? "口座の予定を入れる" : "口座明細を入れる"} onClose={onClose}>
+    <Sheet title={entry ? `${md(entry.date)} ${accountTitle(entry)}` : status === "plan" ? "口座予定入力" : "口座明細入力"} onClose={onClose}>
       {switcher}
       {entry && <div className="note"><StatusChip status={entry.status} /> {ACCOUNT_SOURCE_LABEL[entry.source]}から</div>}
       <div className="seg" role="group" aria-label="入出金区分">
@@ -195,8 +195,8 @@ function AccountForm({ store, data, entry, preset, onClose, switcher }: { store:
       <div className="btns">
         <button className="btn" onClick={save}>保存</button>
         {entry?.status === "plan" && <button className="btn ghost" onClick={confirmIt}>この金額で確定にする</button>}
-        <button className="btn ghost" onClick={onClose}>やめる</button>
-        {entry && <button className="btn danger" onClick={remove}>消す</button>}
+        <button className="btn ghost" onClick={onClose}>取消</button>
+        {entry && <button className="btn danger" onClick={remove}>削除</button>}
       </div>
       {entry && entry.direction === "out" && (entry.group === "variable" || entry.group === "fixed") && <SplitForm store={store} data={data} entry={entry} onClose={onClose} />}
     </Sheet>
@@ -208,24 +208,24 @@ function CardV5({ store, data, entry, onClose }: { store: Store; data: AppData; 
   const linked = data.v5.moves.find((m) => m.kind === "spend" && m.entry_kind === "card" && m.entry_id === entry.id);
   const buys = data.v5.plans.filter((p) => p.kind === "buy" && !p.done);
   const [planId, setPlanId] = useState(buys[0]?.id ?? "");
-  const revolve = async (on: boolean) => { if (await store.run(() => actions5.toRevolving(data, entry, on, todayJST()))) { toast(on ? "リボに回しました" : "リボから戻しました"); onClose(); } };
+  const revolve = async (on: boolean) => { if (await store.run(() => actions5.toRevolving(data, entry, on, todayJST()))) { toast(on ? "リボ化しました" : "リボを解除しました"); onClose(); } };
   const hasLoan = data.v5.loans.some((l) => l.card === entry.card);
   const link = async () => {
     if (!planId) return;
-    if (await store.run(() => actions5.addMove({ plan_id: planId, kind: "spend", amount: entry.amount, date: entry.date, bonus_entry_id: null, entry_kind: "card", entry_id: entry.id, memo: cardTitle(entry) }))) { toast("計画にひも付けました"); onClose(); }
+    if (await store.run(() => actions5.addMove({ plan_id: planId, kind: "spend", amount: entry.amount, date: entry.date, bonus_entry_id: null, entry_kind: "card", entry_id: entry.id, memo: cardTitle(entry) }))) { toast("計画と連携しました"); onClose(); }
   };
   return (
     <div className="panel">
       <div className="btns">
-        {entry.group === "purchase" ? <button className="btn sm ghost" onClick={() => revolve(false)}>リボから戻す</button>
-          : (entry.group === "variable" || entry.group === "fixed") && (hasLoan ? <button className="btn sm ghost" onClick={() => revolve(true)}>リボに回す</button> : <span className="note">リボに回すには、計画の「借入」にこのカードの借入を足してください</span>)}
+        {entry.group === "purchase" ? <button className="btn sm ghost" onClick={() => revolve(false)}>リボ解除</button>
+          : (entry.group === "variable" || entry.group === "fixed") && (hasLoan ? <button className="btn sm ghost" onClick={() => revolve(true)}>リボ化</button> : <span className="note">リボ化には、計画の「借入」にこのカードの借入が必要です</span>)}
       </div>
       {linked ? (
-        <div className="note">計画「{data.v5.plans.find((p) => p.id === linked.plan_id)?.name}」にひも付けています（予算に数えず、積立額から払う） <button className="btn sm ghost" onClick={() => store.run(() => actions5.removeMove(linked.id))}>外す</button></div>
+        <div className="note">計画「{data.v5.plans.find((p) => p.id === linked.plan_id)?.name}」と連携中（予算に数えず積立額から払う） <button className="btn sm ghost" onClick={() => store.run(() => actions5.removeMove(linked.id))}>連携解除</button></div>
       ) : buys.length > 0 && (
         <div className="grid2">
-          <Field label="購入の計画にひも付ける"><Select value={planId} options={buys.map((p) => p.id)} labels={Object.fromEntries(buys.map((p) => [p.id, p.name]))} onChange={setPlanId} /></Field>
-          <div className="btns"><button className="btn sm" onClick={link}>ひも付ける</button></div>
+          <Field label="計画連携（購入）"><Select value={planId} options={buys.map((p) => p.id)} labels={Object.fromEntries(buys.map((p) => [p.id, p.name]))} onChange={setPlanId} /></Field>
+          <div className="btns"><button className="btn sm" onClick={link}>計画連携</button></div>
         </div>
       )}
     </div>
@@ -239,9 +239,9 @@ function SplitForm({ store, data, entry, onClose }: { store: Store; data: AppDat
   const [parts, setParts] = useState<{ category: string; amount: number | "" }[]>([{ category: entry.category ?? cats[0], amount: entry.amount }, { category: cats[0], amount: "" }]);
   const sumOf = parts.reduce((a, p) => a + (Number(p.amount) || 0), 0);
   const split = async () => {
-    if (await store.run(() => actions5.splitAccount(data, entry, parts.filter((p) => p.amount).map((p) => ({ category: p.category, amount: Number(p.amount) }))))) { toast("分けました"); onClose(); }
+    if (await store.run(() => actions5.splitAccount(data, entry, parts.filter((p) => p.amount).map((p) => ({ category: p.category, amount: Number(p.amount) }))))) { toast("分割しました"); onClose(); }
   };
-  if (!open) return <div className="btns"><button className="btn sm ghost" onClick={() => setOpen(true)}>費目ごとに分ける</button></div>;
+  if (!open) return <div className="btns"><button className="btn sm ghost" onClick={() => setOpen(true)}>分割</button></div>;
   return (
     <div className="panel">
       {parts.map((p, i) => (
@@ -252,8 +252,8 @@ function SplitForm({ store, data, entry, onClose }: { store: Store; data: AppDat
       ))}
       <div className="note num">合計 {yen(sumOf)} / {yen(entry.amount)}</div>
       <div className="btns">
-        <button className="btn sm ghost" onClick={() => setParts([...parts, { category: cats[0], amount: "" }])}>行を足す</button>
-        <button className="btn sm" disabled={sumOf !== entry.amount} onClick={split}>分ける</button>
+        <button className="btn sm ghost" onClick={() => setParts([...parts, { category: cats[0], amount: "" }])}>行追加</button>
+        <button className="btn sm" disabled={sumOf !== entry.amount} onClick={split}>分割</button>
       </div>
     </div>
   );
@@ -284,16 +284,16 @@ export function BillSheet({ store, data, entry, onClose }: { store: Store; data:
               {confirmed && entry.amount !== bill.estimate && <tr><td>差（入っていない明細があるかもしれません）</td><td className="num">{signed(entry.amount - bill.estimate)}</td></tr>}
             </tbody>
           </table>
-          <h2>中身（{+bill.closingYm.slice(5)}月のクレカ明細）</h2>
+          <h2>内訳（{+bill.closingYm.slice(5)}月のクレカ明細）</h2>
           <table className="tbl"><tbody>{bill.items.map((e) => (
             <tr key={e.id}><td className="num">{md(e.date)}</td><td style={{ textAlign: "left" }}>{cardTitle(e)} {e.status === "plan" && <StatusChip status="plan" />}<div className="note">{CARD_GROUP_LABEL[e.group]}{e.category ? `・${e.category}` : ""}</div></td><td className="num">{yen(e.amount)}</td></tr>
           ))}</tbody></table>
         </>
       )}
-      <Field label="確定の額（カード会社からの請求額）" hint="三井はメール（お支払い金額のお知らせ）から自動で入ります"><NumInput value={val} onChange={setVal} /></Field>
+      <Field label="確定の額（カード会社からの請求額）" hint={`${data.settings.cards[0]?.name ?? "1枚目のカード"}はメール（お支払い金額のお知らせ）から自動で入ります`}><NumInput value={val} onChange={setVal} /></Field>
       <div className="btns">
         <button className="btn" onClick={() => val !== "" && set(val)}>確定にする</button>
-        {confirmed && <button className="btn ghost" onClick={() => set(null)}>見込みに戻す</button>}
+        {confirmed && <button className="btn ghost" onClick={() => set(null)}>見込に戻す</button>}
         <button className="btn ghost" onClick={onClose}>閉じる</button>
       </div>
     </Sheet>
