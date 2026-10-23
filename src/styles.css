@@ -266,3 +266,5 @@ details.why summary, details.panel summary { font-size: 13px; color: var(--accen
 .formula .tot .am { font-family: var(--f-num); }
 .neg { color: var(--bad); }
 .pos { color: var(--accent); }
+.pcard.lowbad { border-color: var(--bad); background: color-mix(in srgb, var(--bad-soft) 55%, var(--surface)); }
+.pcard .meta b { font-family: var(--f-num); }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { addDays, budgetCats, budgetView, drawPlan, groupOfCat, isLive, lastDay, outlook, RESERVE, slackAt, slackOn, type Part } from "../engine";
+import { addDays, bankOn, budgetCats, budgetView, drawPlan, groupOfCat, isLive, lastDay, lowest, outlook, RESERVE, slackAt, slackOn, type Part } from "../engine";
 import { actions, actions5, type AppData, type Store } from "../data/store";
 import { Bar, cardOfPay, cardTitle, accountTitle, Chip, Field, md, money, NumInput, Select, toast, yen } from "./common";
 import type { OpenPart } from "./Parts";
@@ -85,6 +85,8 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
   const daysLeft = lastDay(ym) - +today.slice(8) + 1;
   // 余裕額の先の動き（60日）と、返済の計画があれば返したあとの見込み
   const days = useMemo(() => (data.balances.length ? outlook(data, today, today, addDays(today, 60)) : []), [data, today]);
+  const bankNow = useMemo(() => bankOn(data, today).amount, [data, today]);
+  const low = useMemo(() => lowest(data, today, addDays(today, 60)), [data, today]);
   const repay = data.v5.plans.filter((p) => p.kind === "repay" && !p.done && p.due_date && p.due_date >= today).sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0];
   const ahead = useMemo(() => (repay ? { label: `返済後（${md(repay.due_date!)}）`, amount: slackOn(data, repay.due_date!, today).amount } : days.length ? { label: "60日後", amount: days[days.length - 1].slack } : null), [data, today, repay, days]);
   const recent = useMemo(() => [
@@ -117,6 +119,12 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
           <span className="sub2">{ahead ? <span>{ahead.label} <b className={ahead.amount < 0 ? "neg" : ""}>{money(ahead.amount)}</b></span> : <span />}</span>
         </button>
       </section>
+      {data.balances.length > 0 && (
+        <button className={`pcard ${low.bank < 0 ? "lowbad" : ""}`} onClick={() => go("outlook")} style={{ marginTop: -12, marginBottom: 28 }}>
+          <div className="top"><span className="nm">口座残高</span><span className="amt">{money(bankNow)}</span></div>
+          <div className="meta">60日内の最低 <b className={low.bank < 0 ? "neg" : ""}>{md(low.date)} {money(low.bank)}</b>{low.bank < 0 ? "（残高不足）" : ""}</div>
+        </button>
+      )}
       {over > 0 && draws.length > 0 && <div className="alert">使いすぎで余裕額がマイナスです。<button className="btn sm" onClick={applyDraw}>確保額から取崩（{draws.map((x) => `${x.plan.name} ${money(x.amount)}`).join("・")}）</button></div>}
 
       <section>

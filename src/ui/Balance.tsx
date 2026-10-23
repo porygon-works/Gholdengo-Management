@@ -28,7 +28,7 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
 
       <h2>残高更新 <small>通帳・アプリの額</small></h2>
       <div className="grid2">
-        <Field label="口座の本当の残高"><NumInput value={bank} onChange={setBank} /></Field>
+        <Field label="口座残高（通帳・アプリの額）"><NumInput value={bank} onChange={setBank} /></Field>
         <div className="btns"><button className="btn sm" onClick={() => fix("bank", bank)}>更新</button></div>
       </div>
 
@@ -53,7 +53,7 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
 
       {hist.length > 0 && (
         <>
-          <h2>残高を入れた・直した履歴</h2>
+          <h2>残高の履歴</h2>
           <table className="tbl"><tbody>{hist.map((b) => (
             <tr key={b.id}>
               <td className="num">{md(b.date)}</td>

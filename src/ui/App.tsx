@@ -133,7 +133,7 @@ function Main() {
             <h3>メニュー</h3>
             <button onClick={() => { setMenu(false); setSheet({ type: "balance" }); }}>口座残高</button>
             <button onClick={() => go("review")}>要確認 <span className="num">{reviews || ""}</span></button>
-            <button onClick={() => go("flow")}>口座の見通し</button>
+            <button onClick={() => go("flow")}>見通し</button>
             <button onClick={() => go("plans")}>計画</button>
             <button onClick={() => go("settings")}>設定</button>
             <button onClick={() => { setMenu(false); store.refresh(); }}>再読込</button>

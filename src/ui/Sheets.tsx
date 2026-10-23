@@ -100,7 +100,7 @@ export function CardSheet({ store, data, entry, preset, onClose, switcher }: { s
       {(group === "variable" || group === "fixed") && <Field label="立替額（一部だけ立て替えたとき）" hint="自分の分だけを予算に数えます"><NumInput value={tatekae} onChange={setTatekae} /></Field>}
       {added > 0 && (
         <div className="panel">
-          <label className="check"><input type="checkbox" checked={refund} onChange={(e) => setRefund(e.target.checked)} />返してもらう {yen(added)}円 を入金の予定に入れる</label>
+          <label className="check"><input type="checkbox" checked={refund} onChange={(e) => setRefund(e.target.checked)} />立替の返金予定（¥{yen(added)}）</label>
           {refund && (
             <div className="grid2">
               <Field label="返してもらう日（見込み）"><input type="date" value={refundDate} onChange={(e) => setRefundDate(e.target.value)} /></Field>
