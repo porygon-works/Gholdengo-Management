@@ -192,6 +192,13 @@ function PlanSheet({ store, data, plan: p, f, today, onClose }: { store: Store; 
         </>
       )}
 
+      {(() => {
+        // 足りないとき、使う日までに入る賞与があれば、そこから足りない分を入れるボタンを出す
+        const bonus = p.use_date && st.st.short > 0 ? data.accounts.find((e) => e.direction === "in" && /賞与|ボーナス/.test(e.name) && e.date >= today && e.date <= p.use_date!) : undefined;
+        if (!bonus) return null;
+        const amount = Math.min(st.st.short, bonus.amount);
+        return <button className="alert" onClick={() => run(() => actions.addFund(p, { source: "bonus", name: "賞与から", date: bonus.date, budget_month: null, amount }), "賞与から入れました")}>{md(bonus.date)}の{bonus.name}（{yen(bonus.amount)}）から {yen(amount)} 入れる</button>;
+      })()}
       <h4>予定の取引</h4>
       <div className="plines">
         {lines.map((l) => {

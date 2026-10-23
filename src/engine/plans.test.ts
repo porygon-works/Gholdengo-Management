@@ -129,3 +129,19 @@ describe("計画の計算（見直し）", () => {
     expect(at("2026-12-31").bank).toBe(100000);
   });
 });
+
+describe("使う日に入る分", () => {
+  it("賞与の日にまとめて返すとき、その日の賞与から入れる分も数える", () => {
+    const plan = P({ id: "p1", use_date: "2026-12-15" });
+    const d = D({
+      balances: [{ id: "b", date: "2026-11-01", bank: 10000, cash: 0, paypay: 0, memo: "" }], months: [{ month: "2026-11", budget: 0, memo: "" }, { month: "2026-12", budget: 0, memo: "" }],
+      plans: [plan], debts: [DB({ id: "d1", balance: 50000 })], funds: [F({ source: "bonus", date: "2026-12-15", amount: 50000 })],
+      accounts: [A({ status: "plan", source: "manual", direction: "in", group: "other", name: "賞与", date: "2026-12-15", amount: 60000 }), A({ id: "L", plan_id: "p1", plan_role: "lump", date: "2026-12-15", amount: 50000 })],
+    });
+    const st = planStatus(d, plan, forecast(d, "2026-11-10", 2));
+    expect([st.need, st.got, st.short, st.ok]).toEqual([50000, 50000, 0, true]);
+    // 賞与から入れていなければ足りない。予備（賞与の残り 60,000 ＋ 10,000 − 0）でまかなえる
+    const st2 = planStatus({ ...d, funds: [] }, plan, forecast({ ...d, funds: [] }, "2026-11-10", 2));
+    expect([st2.short, st2.spare, st2.ok]).toEqual([50000, 70000, true]);
+  });
+});
