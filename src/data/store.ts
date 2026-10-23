@@ -266,7 +266,8 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
   const bills = syncBills(d, today, [addMonths(cur, -1), cur, addMonths(cur, 1)]);
   if (bills.inserts.length) await backend.insert("account_entries", bills.inserts as unknown as Row[], { onConflict: "source_ref" });
   for (const u of bills.updates) await backend.update("account_entries", u.id, u.patch as Row);
-  if (bills.inserts.length || bills.updates.length) return true;
+  for (const id of bills.removes) await backend.remove("account_entries", id);
+  if (bills.inserts.length || bills.updates.length || bills.removes.length) return true;
 
   const { merges } = findMerges(d.cards);
   for (const m of merges) {
