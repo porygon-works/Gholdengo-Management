@@ -104,7 +104,7 @@ h2 small { font-weight: 400; color: var(--mut); font-size: 12px; }
 .row .t div + div { font-size: 12px; color: var(--mut); overflow-wrap: anywhere; }
 .row .a { font-weight: 600; text-align: right; white-space: nowrap; }
 .row .a small { display: block; font-size: 11px; color: var(--mut); font-weight: 400; }
-.row.plan { background: repeating-linear-gradient(135deg, transparent 0 8px, var(--warn-soft) 8px 10px); }
+.row.plan { background: color-mix(in srgb, var(--sunk) 60%, transparent); box-shadow: inset 3px 0 0 var(--gold); }
 .row.merged { opacity: .55; }
 .cathead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; cursor: pointer; padding: 2px 0; background: none; border: 0; width: 100%; text-align: left; }
 .cathead .n { font-weight: 700; }

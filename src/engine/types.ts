@@ -230,7 +230,7 @@ export const ACCOUNT_GROUP_LABEL: Record<AccountGroup, string> = {
   variable: "変動費", fixed: "固定費", tatekae: "立替", card: "クレカ支払い", other: "その他", salary: "給与", extra: "追加予算", refund: "立替の返金", bonus: "賞与",
 };
 export const CARD_GROUP_LABEL: Record<CardGroup, string> = {
-  variable: "変動費", fixed: "固定費", tatekae: "立替", installment: "分割（返済）", purchase: "分割（購入）",
+  variable: "変動費", fixed: "固定費", tatekae: "立替", installment: "分割（旧）", purchase: "リボ",
 };
 
 // ---------- v5（設計書 docs/superpowers/specs/2026-10-23-v5-yoyuugaku-design.md） ----------

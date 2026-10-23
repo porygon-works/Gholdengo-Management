@@ -215,7 +215,7 @@ function RecurringSheet({ store, data, r, onClose }: { store: Store; data: AppDa
   const payKey = x.pay === "card" ? `card:${x.card ?? s.cards[0].id}` : x.pay ?? "bank";
   const payKeys = ["bank", "wallet", ...s.cards.map((c) => `card:${c.id}`)];
   const payLabels = { bank: "口座", wallet: "財布", ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, `クレカ（${c.name}）`])) };
-  const groups: string[] = x.kind === "income" ? IN_GROUPS : x.pay === "card" ? ["variable", "fixed", "installment"] : ["variable", "fixed", "other"];
+  const groups: string[] = x.kind === "income" ? IN_GROUPS : x.pay === "card" ? ["variable", "fixed"] : ["variable", "fixed", "other"];
   const labels = x.pay === "card" ? CARD_GROUP_LABEL : ACCOUNT_GROUP_LABEL;
   const save = async () => {
     if (!x.name || !x.amount || !x.day) { toast("名前・金額・日を入れてください"); return; }
@@ -327,10 +327,10 @@ function Assets({ store, data }: { store: Store; data: AppData }) {
 
 // ---------- 区分 ----------
 
-const GROUP_KEYS = ["variable", "fixed", "tatekae", "installment", "purchase", "card", "other", "salary", "extra", "refund"] as const;
+const GROUP_KEYS = ["variable", "fixed", "tatekae", "purchase", "card", "other", "salary", "extra", "refund", "bonus"] as const;
 const GROUP_WHERE: Record<(typeof GROUP_KEYS)[number], string> = {
-  variable: "クレカ明細・口座明細の出金", fixed: "クレカ明細・口座明細の出金", tatekae: "クレカ明細・口座明細の出金", installment: "クレカ明細",
-  purchase: "クレカ明細", card: "口座明細の出金（クレカの請求）", other: "口座明細の入金・出金", salary: "口座明細の入金", extra: "口座明細の入金", refund: "口座明細の入金",
+  variable: "クレカ明細・口座明細の出金", fixed: "クレカ明細・口座明細の出金", tatekae: "クレカ明細・口座明細の出金",
+  purchase: "クレカ明細", card: "口座明細の出金（クレカの請求）", other: "口座明細の入金・出金", salary: "口座明細の入金", extra: "口座明細の入金", refund: "口座明細の入金", bonus: "口座明細の入金",
 };
 
 /** 区分：費目（名前・大費目・1日に使える額・追加・削除）と大費目の名前 */

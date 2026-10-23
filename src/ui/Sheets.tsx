@@ -87,11 +87,11 @@ export function CardSheet({ store, data, entry, preset, onClose, switcher }: { s
         <Field label="カード"><Select value={card} options={s.cards.map((c) => c.id)} labels={Object.fromEntries(s.cards.map((c) => [c.id, c.name]))} onChange={setCard} /></Field>
         <Field label="利用日"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="金額"><NumInput value={amount} onChange={setAmount} /></Field>
-        <Field label="大費目"><Select value={group} options={CARD_GROUPS} labels={CARD_GROUP_LABEL} onChange={setGroup} /></Field>
+        <Field label="大費目"><Select value={group} options={CARD_GROUPS.filter((g) => g !== "installment" || group === "installment")} labels={CARD_GROUP_LABEL} onChange={setGroup} /></Field>
       </div>
       {(group === "variable" || group === "fixed" || group === "purchase") && <Field label="費目"><Select value={cat} options={catOptions(data)} onChange={pickCat} /></Field>}
-      {group === "installment" && <div className="note">分割（返済）：前の版の毎月の返済額。v5 では借入の返済は計画の「借入」から出すので、計算に入れません。</div>}
-      {group === "purchase" && <div className="note">分割（購入）：リボに回した明細。カードの請求には入らず、そのカードの借入残高に足します。予算にはその費目で数えます。</div>}
+      {group === "installment" && <div className="note">前の版の毎月の返済額。計算には入れません（借入の返済は計画の「借入」から）。</div>}
+      {group === "purchase" && <div className="note">請求に入らず、借入残高に足す。予算はその費目で数える。</div>}
       {group === "tatekae" && <div className="note">立替：全額を立て替えた。請求には入り、予算には数えません。</div>}
       <div className="grid2">
         <Field label="名称（商品名など）"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
