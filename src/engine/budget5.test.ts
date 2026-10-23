@@ -54,9 +54,13 @@ describe("予算残額と費目別残額", () => {
     expect(v.left.amount).toBe(165000);
     expect(v.fixed).toEqual({ budget: 80000, used: 85000 });
   });
-  it("リボに回した明細（分割（購入））も、その費目で予算に数える", () => {
-    const d = D({ ...base(), cards: [card({ card: "saison", date: "2026-11-01", amount: 80000, group: "purchase", category: "家賃" })] });
+  it("v5 でリボに回した明細（リボに回した日がある）も、その費目で予算に数える", () => {
+    const d = D({ ...base(), cards: [card({ card: "saison", date: "2026-11-01", amount: 80000, group: "purchase", category: "家賃", revolved_at: "2026-11-10" })] });
     expect(budgetView(d, "2026-11", "2026-11-20").fixed).toEqual({ budget: 80000, used: 80000 });
+  });
+  it("前の版の分割（購入）（リボに回した日がない）は、予算の外で買ったものなので数えない", () => {
+    const d = D({ ...base(), cards: [card({ date: "2026-11-03", amount: 55000, group: "purchase", category: null })] });
+    expect(budgetView(d, "2026-11", "2026-11-20").left.amount).toBe(170000);
   });
   it("計画にひも付けた購入は予算に数えない", () => {
     const d = D({ ...base(), cards: [card({ id: "pc", date: "2026-11-05", amount: 60000 })], v5: { moves: [{ id: "m", plan_id: "p", kind: "spend", amount: 60000, date: "2026-11-05", bonus_entry_id: null, entry_kind: "card", entry_id: "pc", memo: "" }] } });

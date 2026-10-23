@@ -22,7 +22,7 @@ describe("余裕額（今日）", () => {
     const base = example();
     const d: Data = {
       ...base,
-      cards: base.cards.map((e) => (e.id === "nov-rent" ? { ...e, group: "purchase" } : e)),
+      cards: base.cards.map((e) => (e.id === "nov-rent" ? { ...e, group: "purchase", revolved_at: "2026-11-20" } : e)),
       accounts: [...base.accounts.map((e) => (e.id === "nov-pay" ? { ...e, status: "confirmed" as const } : e)), billRow("saison", "2026-11-04", 80000)],
       v5: { ...base.v5, loans: [{ id: "l1", plan_id: null, name: "セゾンのリボ", card: "saison", monthly: 0, pay_day: null, sort: 0 }], balances: [{ id: "lb", loan_id: "l1", date: "2026-10-31", balance: 0 }] },
     };

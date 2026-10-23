@@ -9,7 +9,7 @@ const revolving = (): Data => {
   const d = example();
   return {
     ...d,
-    cards: d.cards.map((e) => (e.id === "nov-rent" ? { ...e, group: "purchase" } : e)),
+    cards: d.cards.map((e) => (e.id === "nov-rent" ? { ...e, group: "purchase", revolved_at: "2026-11-01" } : e)),
     v5: {
       ...d.v5,
       plans: [{ id: "rp", kind: "repay", name: "リボを12月に返す", target: 0, due_date: "2026-12-27", monthly: 0, start_month: null, draw_order: 0, no_draw: true, done: false, sort: 0 }],

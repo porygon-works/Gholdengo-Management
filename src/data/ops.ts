@@ -1,4 +1,4 @@
-import { budgetsFor, groupOfCat, monthBudget, type AccountEntry, type CardEntry, type Data, type PlanMove, type Recurring, type V5Plan } from "../engine";
+import { budgetsFor, groupOfCat, monthBudget, todayJST, type AccountEntry, type CardEntry, type Data, type PlanMove, type Recurring, type V5Plan } from "../engine";
 import { backend, type Row } from "./backend";
 import { actions, actions5, type AppData } from "./store";
 
@@ -186,7 +186,8 @@ export function simulateOps(d: Data, changes: Change[]): Data {
         if (c.kind === "delete") { if (card) x.cards = x.cards.filter((e) => e.id !== id); else x.accounts = x.accounts.filter((e) => e.id !== id); break; }
         const patch: Record<string, unknown> = { ...data };
         if (data.category && !data.group && (card || data.direction === "out")) patch.group = groupOfCat(x.settings, String(data.category));
-        const before = list.find((e) => e.id === id);
+        const before = list.find((e) => e.id === id) as { revolved_at?: string | null } | undefined;
+        if (card && data.group === "purchase" && !before?.revolved_at) patch.revolved_at = todayJST();
         const base = card
           ? { card: x.settings.cards[0].id, status: "plan", group: "variable", category: null, name: "", shop: "", memo: "", tatekae: 0, source: "manual", source_ref: c.key?.ref ?? null, merged_into: null, not_dup: [], locked: true, recurring_id: null, goal_id: null }
           : { account: "bank", status: "plan", category: null, name: "", memo: "", source: "manual", source_ref: c.key?.ref ?? null, recurring_id: null, goal_id: null, card: null, pair_id: null, locked: true };
@@ -250,6 +251,8 @@ export async function applyOps(d: AppData, changes: Change[], today: string) {
         // 費目があって大費目がなければ、費目から決める
         const patch: Row = { ...data };
         if (data.category && !data.group && (card || data.direction === "out")) patch.group = groupOfCat(d.settings, String(data.category));
+        // リボに回したら、回した日を持つ（借入残高に足す日・予算に数えるかの目印。設計書 §3.4）
+        if (card && data.group === "purchase" && !(c.id && d.cards.find((e) => e.id === c.id)?.revolved_at)) patch.revolved_at = today;
         if (c.id) { await backend.update(c.table, c.id, { ...patch, locked: true }); break; }
         const base = card
           ? { card: d.settings.cards[0].id, status: "plan", group: "variable", category: null, name: "", shop: "", memo: "", tatekae: 0 } satisfies Partial<CardEntry>

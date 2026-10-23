@@ -73,7 +73,7 @@ h2 small { font-weight: 400; color: var(--mut); font-size: 12px; }
 .bar { height: 10px; border-radius: 5px; background: var(--sunk); display: flex; overflow: hidden; }
 .bar i { display: block; height: 100%; }
 .bar .u { background: var(--gold); }
-.bar .p { background: repeating-linear-gradient(135deg, var(--warn) 0 4px, transparent 4px 7px); opacity: .9; }
+.bar .p { background: repeating-linear-gradient(135deg, var(--gold) 0 3px, transparent 3px 6px); opacity: .9; }
 .bar .o { background: var(--bad); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--mut); }
 .legend b { color: var(--ink); font-weight: 600; }

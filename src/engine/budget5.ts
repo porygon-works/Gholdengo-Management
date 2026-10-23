@@ -48,7 +48,7 @@ export const cardRow = (e: CardEntry, amount = e.amount): PartRow => ({ date: e.
 export const linkedSpends = (d: Data) => new Set(d.v5.moves.map((m) => spendTarget(d, m)).filter((x): x is string => !!x));
 
 /**
- * その月の、予算に数える出費。クレカ明細の変動費・固定費・分割（購入）（リボに回した明細も、その費目で数える）と、口座明細の出金の変動費・固定費。
+ * その月の、予算に数える出費。クレカ明細の変動費・固定費・v5 でリボに回した明細（その費目で数える）と、口座明細の出金の変動費・固定費。
  * 計画にひも付けた購入と、v4 の計画の取引は数えない
  */
 function spends(d: Data, ym: string): Spend5[] {
@@ -57,7 +57,8 @@ function spends(d: Data, ym: string): Spend5[] {
   const out: Spend5[] = [];
   for (const e of d.cards) {
     if (!isLive(e) || ymOf(e.date) !== ym || linked.has(`card:${e.id}`)) continue;
-    if (e.group !== "variable" && e.group !== "fixed" && e.group !== "purchase") continue;
+    // リボに回した明細は、v5 で回したもの（回した日がある）だけ数える。前の版の分割（購入）は予算の外で買ったもの
+    if (e.group !== "variable" && e.group !== "fixed" && !(e.group === "purchase" && e.revolved_at)) continue;
     const fixed = e.group === "fixed" || (e.group === "purchase" && isFixedCat(s, e.category));
     out.push({ fixed, category: e.category, plan: e.status === "plan", own: ownCost(e), row: cardRow(e, ownCost(e)) });
   }

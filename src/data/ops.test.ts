@@ -62,6 +62,7 @@ describe("Claude との相談の取り込み（gholdengo-ops-v2）", () => {
     expect(after.v5.moves[0]).toMatchObject({ plan_id: "p1", kind: "manual", amount: 20000 });
     expect(after.v5.months[0]).toEqual({ month: "2026-12", budget: 150000, source: "decided" });
     expect(after.cards[0]).toMatchObject({ group: "purchase", amount: 80000 });
+    expect(after.cards[0].revolved_at).toBeTruthy(); // Claude からリボに回したときも、回した日を持つ
     expect(d.v5.moves).toEqual([]);
   });
   it("v1 の形式は古いので取り込まない", () => {
