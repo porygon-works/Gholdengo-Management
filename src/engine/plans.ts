@@ -36,7 +36,11 @@ export function planBucket(d: Data, p: Plan, date: string): number {
 }
 
 /** 使う日の前の日までに確保額にたまる額（貯蓄は until の日まで） */
-export const planCollected = (d: Data, p: Plan, until: string) => planBucket(d, p, p.use_date ? addDays(p.use_date, -1) : until);
+/** 使う日までにたまる額（使う日に入る分も数える。賞与の日にまとめて返すときなど）。貯蓄は until の日まで */
+export function planCollected(d: Data, p: Plan, until: string): number {
+  if (!p.use_date) return planBucket(d, p, until);
+  return planFunds(d, p).filter((f) => f.date <= p.use_date!).reduce((a, f) => a + f.amount, 0);
+}
 
 /** その月の、計画の分（予算から引く額）＝ 計画の支払い ＋ 予算から確保額に入れる分 */
 export function planMinus(d: Data, ym: string): number {
@@ -102,9 +106,11 @@ export function planStatus(d: Data, p: Plan, f: Forecast | null): PlanStatus {
   const until = f?.end ?? addMonths(ymOf(new Date().toISOString().slice(0, 10)), 6) + "-01";
   const got = planCollected(d, p, until);
   const short = p.use_date ? Math.max(0, need - got) : 0;
-  const day = p.use_date ? addDays(p.use_date, -1) : until;
+  // 予備は、使う日にまとめて払う前の口座残高から、この計画にたまった分とほかの計画の分を引いた額
+  const day = p.use_date ?? until;
   const bank = f ? bankAt(f, day) : null;
-  const spare = bank == null ? 0 : bank - d.plans.reduce((a, q) => a + planBucket(d, q, day), 0);
+  const lump = p.use_date ? planLump(d, p)?.amount ?? 0 : 0;
+  const spare = bank == null ? 0 : bank + lump - got - d.plans.filter((q) => q.id !== p.id).reduce((a, q) => a + planBucket(d, q, day), 0);
   return { need, got, short, spare, ok: short <= 0 || spare >= short };
 }
 
