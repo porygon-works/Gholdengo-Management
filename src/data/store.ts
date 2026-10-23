@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   addMonths, applyLabels, budgetFundDate, cardPayDate, categorize, closingEnd, closingFor, computeMonth, DEFAULT_SETTINGS, duplicateInstallments, findMerges, withBills, goalPayDate, goalSchedule, groupOfCat, missingRecurring, normalizeBills, RESERVE, ruleFor, syncBills, syncLumps, todayJST, ymOf,
-  type AccountEntry, type Balance, type Budget, type CardEntry, type Data, type FundSource, type Goal, type MonthSetting, type Plan, type PlanDebt, type PlanFund, type PlanKind, type Recurring, type Rule, type Settings, type Status,
+  type AccountEntry, type Balance, type Budget, type Loan, type LoanBalance, type PlanMove, type V5Data, type V5Month, type V5Plan, type CardEntry, type Data, type FundSource, type Goal, type MonthSetting, type Plan, type PlanDebt, type PlanFund, type PlanKind, type Recurring, type Rule, type Settings, type Status,
 } from "../engine";
 import { backend, newId, type Raw, type Row } from "./backend";
 import { SEED_RULES } from "./seed";
@@ -24,7 +24,7 @@ function settingsOf(raw: Raw): Settings {
   return s;
 }
 
-function toData(raw: Raw): AppData {
+export function toData(raw: Raw): AppData {
   const settings = settingsOf(raw);
   applyLabels(settings);
   // 消した明細（deleted）は計算にも画面にも出さない。source_ref だけ覚えておき、また作らない
@@ -60,7 +60,25 @@ function toData(raw: Raw): AppData {
   const budgets: Budget[] = raw.budgets.map((r) => ({ month: str(r.month), category: str(r.category), amount: num(r.amount) }));
   const rules: Rule[] = raw.rules.map((r) => ({ id: str(r.id), pattern: str(r.pattern), category: str(r.category) }));
   const review: ReviewRow[] = raw.review.map((r) => ({ id: str(r.id), kind: str(r.kind), title: str(r.title), body: str(r.body), resolved: !!r.resolved, created_at: str(r.created_at) }));
-  return { accounts: normalizeBills(accounts), cards, balances, recurring, goals, plans, debts, funds, months, budgets, rules, settings, review, removedRefs, missing: raw.missing ?? [] };
+  return { accounts: normalizeBills(accounts), cards, balances, recurring, goals, plans, debts, funds, months, budgets, rules, settings, review, removedRefs, missing: raw.missing ?? [], v5: v5Of(raw) };
+}
+
+/** v5 の表（0008_v5.sql）。表がまだなければ全部空 */
+function v5Of(raw: Raw): V5Data {
+  const plans: V5Plan[] = [...(raw.v5_plans ?? [])].sort((a, b) => num(a.sort) - num(b.sort) || str(a.created_at).localeCompare(str(b.created_at))).map((r) => ({
+    id: str(r.id), kind: (r.kind === "buy" || r.kind === "save" ? r.kind : "repay") as PlanKind, name: str(r.name), target: num(r.target), due_date: r.due_date ? day(r.due_date) : null,
+    monthly: num(r.monthly), start_month: opt(r.start_month), draw_order: num(r.draw_order), no_draw: !!r.no_draw, done: !!r.done, sort: num(r.sort),
+  }));
+  const loans: Loan[] = [...(raw.v5_loans ?? [])].sort((a, b) => num(a.sort) - num(b.sort)).map((r) => ({
+    id: str(r.id), plan_id: opt(r.plan_id), name: str(r.name), card: opt(r.card), monthly: num(r.monthly), pay_day: r.pay_day == null || r.pay_day === "" ? null : num(r.pay_day), sort: num(r.sort),
+  }));
+  const balances: LoanBalance[] = (raw.v5_loan_balances ?? []).map((r) => ({ id: str(r.id), loan_id: str(r.loan_id), date: day(r.date), balance: num(r.balance), at: str(r.created_at) || undefined }));
+  const moves: PlanMove[] = (raw.v5_moves ?? []).map((r) => ({
+    id: str(r.id), plan_id: str(r.plan_id), kind: (r.kind === "bonus" || r.kind === "draw" || r.kind === "spend" ? r.kind : "manual") as PlanMove["kind"], amount: num(r.amount), date: day(r.date),
+    bonus_entry_id: opt(r.bonus_entry_id), entry_kind: r.entry_kind === "card" || r.entry_kind === "account" ? r.entry_kind : null, entry_id: opt(r.entry_id), memo: str(r.memo),
+  }));
+  const months: V5Month[] = (raw.v5_months ?? []).map((r) => ({ month: str(r.month), budget: num(r.budget), source: r.source === "guide" ? "guide" : "decided" }));
+  return { plans, loans, balances, moves, months };
 }
 
 const CACHE = "gholdengo.cache.v4";

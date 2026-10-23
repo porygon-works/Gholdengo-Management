@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_SETTINGS, debtLeft, duplicateInstallments, forecast, normalizeBills, planBucket, planMinusItems, planNeed, planStatus, reserveAt, syncLumps,
+  DEFAULT_SETTINGS, debtLeft, duplicateInstallments, forecast, normalizeBills, planBucket, planMinusItems, planNeed, planStatus, reserveAt, syncLumps, emptyV5,
   type AccountEntry, type Data, type Plan, type PlanDebt, type PlanFund,
 } from "./index";
 
@@ -15,7 +15,7 @@ const A = (p: Partial<AccountEntry>): AccountEntry => ({
 const P = (p: Partial<Plan>): Plan => ({ id: p.id ?? `p${++n}`, kind: "repay", name: "リボ", use_date: "2026-12-16", target: 0, done: false, sort: 0, ...p });
 const DB = (p: Partial<PlanDebt>): PlanDebt => ({ id: p.id ?? `d${++n}`, plan_id: "p1", name: "カードA", balance: 50000, as_of: "2026-11-01", sort: 0, ...p });
 const F = (p: Partial<PlanFund>): PlanFund => ({ id: p.id ?? `f${++n}`, plan_id: "p1", source: "bonus", name: "", date: "2026-12-15", budget_month: null, amount: 0, status: "plan", ...p });
-const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], plans: [], debts: [], funds: [], months: [], budgets: [], rules: [], settings: S, ...p });
+const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], plans: [], debts: [], funds: [], months: [], budgets: [], rules: [], settings: S, ...p, v5: p.v5 ?? emptyV5() });
 
 describe("返済の計画", () => {
   const plan = P({ id: "p1" });

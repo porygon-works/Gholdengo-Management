@@ -6,10 +6,10 @@ export type Status = "plan" | "confirmed";
 
 export type Account = "bank" | "wallet";
 export type Direction = "in" | "out";
-/** 大費目。出金：変動費・固定費・立替・クレカ支払い・その他／入金：給与・追加予算・立替の返金・その他 */
-export type AccountGroup = "variable" | "fixed" | "tatekae" | "card" | "other" | "salary" | "extra" | "refund";
+/** 大費目。出金：変動費・固定費・立替・クレカ支払い・その他／入金：給与・追加予算・立替の返金・賞与・その他 */
+export type AccountGroup = "variable" | "fixed" | "tatekae" | "card" | "other" | "salary" | "extra" | "refund" | "bonus";
 export const OUT_GROUPS: AccountGroup[] = ["variable", "fixed", "tatekae", "card", "other"];
-export const IN_GROUPS: AccountGroup[] = ["salary", "extra", "refund", "other"];
+export const IN_GROUPS: AccountGroup[] = ["salary", "extra", "refund", "bonus", "other"];
 export type AccountSource = "manual" | "recurring" | "card_bill" | "goal" | "plan" | "migration";
 
 export interface AccountEntry {
@@ -212,7 +212,7 @@ export const DEFAULT_SETTINGS: Settings = {
     { id: "saison", name: "セゾン", closingDay: 31, payDay: 4, payMonths: 1 },
   ],
   salaryEstimate: 0,
-  varCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽", "美容", "医療", "衣服"],
+  varCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽", "美容", "医療", "衣服", "現金"],
   fixCats: ["家賃", "奨学金", "保険・共済", "通信", "水道ガス光熱費", "定期代", "サブスク"],
   dailyCats: ["食料品", "交通", "外食", "日用品・通販", "趣味・娯楽"],
   version: 6,
@@ -225,11 +225,78 @@ export const isFixedCat = (s: Settings, c: string | null) => !!c && s.fixCats.in
 export const groupOfCat = (s: Settings, c: string | null): "variable" | "fixed" => (isFixedCat(s, c) ? "fixed" : "variable");
 
 export const ACCOUNT_GROUP_LABEL: Record<AccountGroup, string> = {
-  variable: "変動費", fixed: "固定費", tatekae: "立替", card: "クレカ支払い", other: "その他", salary: "給与", extra: "追加予算", refund: "立替の返金",
+  variable: "変動費", fixed: "固定費", tatekae: "立替", card: "クレカ支払い", other: "その他", salary: "給与", extra: "追加予算", refund: "立替の返金", bonus: "賞与",
 };
 export const CARD_GROUP_LABEL: Record<CardGroup, string> = {
   variable: "変動費", fixed: "固定費", tatekae: "立替", installment: "分割（返済）", purchase: "分割（購入）",
 };
+
+// ---------- v5（設計書 docs/superpowers/specs/2026-10-23-v5-yoyuugaku-design.md） ----------
+
+/** 計画（返済・購入・貯蓄）。返済の計画は積立額を持たない */
+export interface V5Plan {
+  id: string;
+  kind: PlanKind;
+  name: string;
+  target: number; // 目標額（購入・貯蓄）
+  due_date: string | null; // 期日
+  monthly: number; // 毎月の積立額（購入・貯蓄）
+  start_month: string | null; // 毎月の積立額を始める月
+  draw_order: number; // 取崩順
+  no_draw: boolean; // 取崩不可
+  done: boolean;
+  sort: number;
+}
+
+/** 借入（返す先ごと）。card があれば毎月の返済はそのカードの引落日、なければ pay_day */
+export interface Loan {
+  id: string;
+  plan_id: string | null;
+  name: string;
+  card: string | null;
+  monthly: number;
+  pay_day: number | null;
+  sort: number;
+}
+
+/** 借入残高の記録（カードのサイトで見た額） */
+export interface LoanBalance {
+  id: string;
+  loan_id: string;
+  date: string;
+  balance: number;
+  at?: string;
+}
+
+/** 計画のお金の出し入れ。amount はいつもプラス（draw・spend は積立額を減らす） */
+export interface PlanMove {
+  id: string;
+  plan_id: string;
+  kind: "manual" | "bonus" | "draw" | "spend";
+  amount: number;
+  date: string;
+  bonus_entry_id: string | null;
+  entry_kind: "card" | "account" | null;
+  entry_id: string | null;
+  memo: string;
+}
+
+/** 月の予算（決めた額か、月の初めに保存した目安額） */
+export interface V5Month {
+  month: string;
+  budget: number;
+  source: "guide" | "decided";
+}
+
+export interface V5Data {
+  plans: V5Plan[];
+  loans: Loan[];
+  balances: LoanBalance[];
+  moves: PlanMove[];
+  months: V5Month[];
+}
+
+export const emptyV5 = (): V5Data => ({ plans: [], loans: [], balances: [], moves: [], months: [] });
 
 export interface Data {
   accounts: AccountEntry[];
@@ -246,4 +313,6 @@ export interface Data {
   settings: Settings;
   /** 消した明細の source_ref（メールの取り込みや予定づくりで、また作らないため） */
   removedRefs?: string[];
+  /** v5 の表（まだなければ全部空） */
+  v5: V5Data;
 }

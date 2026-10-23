@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "../engine";
+import { DEFAULT_SETTINGS, emptyV5 } from "../engine";
 import { planOps } from "./ops";
 import type { AppData } from "./store";
 
@@ -19,6 +19,7 @@ const d: AppData = {
   rules: [{ id: "u1", pattern: "サンプル", category: "食料品" }],
   settings: DEFAULT_SETTINGS,
   review: [],
+  v5: emptyV5(),
 };
 const ops = (list: unknown[]) => ({ format: "gholdengo-ops-v1", note: "テスト", ops: list });
 

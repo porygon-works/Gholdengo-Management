@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges,
   goalSchedule, holidays, isBusinessDay, missingRecurring, monthBase, nextPayday, nextPayments, normalizeShop,
-  recurringDate, recurringDue, ruleFor, shiftBusiness, syncBills,
+  recurringDate, recurringDue, ruleFor, shiftBusiness, syncBills, emptyV5,
   type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
 } from "./index";
 
@@ -22,7 +22,7 @@ const G = (p: Partial<Goal>): Goal => ({
   id: p.id ?? `g${++n}`, kind: "repay", name: "リボ", card: "saison", balance: 30000, as_of: "2026-10-19", target: 0, monthly: 10000, day: 27,
   start_month: null, end_month: null, lumps: [], active: true, sort: 0, ...p,
 });
-const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], plans: [], debts: [], funds: [], months: [], budgets: [], rules: [], settings: S, ...p });
+const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], plans: [], debts: [], funds: [], months: [], budgets: [], rules: [], settings: S, ...p, v5: p.v5 ?? emptyV5() });
 const bal = (p: Partial<Data["balances"][number]> = {}) => ({ id: "b", date: "2026-10-19", bank: 300000, cash: 10000, paypay: 0, memo: "", ...p });
 
 describe("日付と祝日", () => {
