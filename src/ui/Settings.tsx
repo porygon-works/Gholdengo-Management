@@ -44,8 +44,10 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
   const today = todayJST();
   const mb = monthBudget(data, month);
   const g = mb.guide;
-  const [val, setVal] = useState<number | "">(mb.source === "decided" ? mb.amount : "");
-  useEffect(() => setVal(mb.source === "decided" ? mb.amount : ""), [month, mb.amount, mb.source]);
+  // 欄にはいまの予算を最初から入れておく（設計書 §3.2）
+  const [val, setVal] = useState<number | "">(mb.amount);
+  useEffect(() => setVal(mb.amount), [month, mb.amount, mb.source]);
+  const same = val === "" || (mb.source === "decided" && val === mb.amount);
   const [confirm, setConfirm] = useState(false);
   const back = async () => { if (await store.run(() => actions5.decideBudget(data, month, null))) toast("目安額に戻しました"); };
   return (
@@ -56,11 +58,11 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
           <tbody>{g.parts!.map((p, i) => <tr key={p.key}><td>{i ? "− " : ""}{p.label}</td><td className="num">{money(p.amount)}</td></tr>)}</tbody>
           <tfoot><tr><td>＝ 目安額</td><td className="num">{money(g.amount)}</td></tr></tfoot>
         </table>
-        <Field label="この月の予算" hint={val === "" ? "空なら目安額を使います" : `目安額より ${signed(Number(val) - g.amount)}円（多い分は余裕額から出す）`}><NumInput value={val} onChange={(v) => { setVal(v); setConfirm(false); }} placeholder={yen(g.amount)} /></Field>
+        <Field label="この月の予算" hint={val === "" ? "額を入れてください" : same ? "いまの予算です。額を変えると「確認」を押せます" : val === g.amount ? "目安額と同じ" : `目安額より ${signed(Number(val) - g.amount)}円（多い分は余裕額から出す）`}><NumInput value={val} onChange={(v) => { setVal(v); setConfirm(false); }} placeholder={yen(g.amount)} /></Field>
         {confirm && val !== "" ? <ConfirmChange store={store} data={data} today={today} change={{ kind: "decideBudget", month, amount: val }} label="確定" onDone={() => setConfirm(false)} /> : (
           <div className="btns">
-            <button className="btn" disabled={val === ""} onClick={() => setConfirm(true)}>確認</button>
-            {mb.source === "decided" && <button className="btn ghost" onClick={back}>目安額</button>}
+            <button className="btn" disabled={same} onClick={() => setConfirm(true)}>確認</button>
+            {mb.source === "decided" && <button className="btn ghost" onClick={back}>目安に戻す</button>}
           </div>
         )}
       </div>
