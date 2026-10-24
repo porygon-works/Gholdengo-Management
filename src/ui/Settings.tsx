@@ -59,7 +59,7 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
         <Field label="この月の予算" hint={val === "" ? "空なら目安額を使います" : `目安額より ${signed(Number(val) - g.amount)}円（多い分は余裕額から出す）`}><NumInput value={val} onChange={(v) => { setVal(v); setConfirm(false); }} placeholder={yen(g.amount)} /></Field>
         {confirm && val !== "" ? <ConfirmChange store={store} data={data} today={today} change={{ kind: "decideBudget", month, amount: val }} label="確定" onDone={() => setConfirm(false)} /> : (
           <div className="btns">
-            <button className="btn" disabled={val === ""} onClick={() => setConfirm(true)}>確定</button>
+            <button className="btn" disabled={val === ""} onClick={() => setConfirm(true)}>確認</button>
             {mb.source === "decided" && <button className="btn ghost" onClick={back}>目安額</button>}
           </div>
         )}
