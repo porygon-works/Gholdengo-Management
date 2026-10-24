@@ -203,7 +203,7 @@ function AccountForm({ store, data, entry, preset, onClose, switcher }: { store:
   );
 }
 
-/** v5：クレカ明細をリボに回す・戻す、購入の計画にひも付ける（設計書 §3.3・§3.4） */
+/** v5：クレカ明細をリボに回す・戻す、使う日のある貯蓄計画にひも付ける（設計書 §3.3・§3.4） */
 function CardV5({ store, data, entry, onClose }: { store: Store; data: AppData; entry: CardEntry; onClose: () => void }) {
   const linked = data.v5.moves.find((m) => m.kind === "spend" && m.entry_kind === "card" && m.entry_id === entry.id);
   const buys = data.v5.plans.filter((p) => p.kind === "buy" && !p.done);
@@ -224,7 +224,7 @@ function CardV5({ store, data, entry, onClose }: { store: Store; data: AppData; 
         <div className="note">計画「{data.v5.plans.find((p) => p.id === linked.plan_id)?.name}」と連携中（予算に数えず積立額から払う） <button className="btn sm ghost" onClick={() => store.run(() => actions5.removeMove(linked.id))}>連携解除</button></div>
       ) : buys.length > 0 && (
         <div className="grid2">
-          <Field label="計画連携（購入）"><Select value={planId} options={buys.map((p) => p.id)} labels={Object.fromEntries(buys.map((p) => [p.id, p.name]))} onChange={setPlanId} /></Field>
+          <Field label="計画連携（貯蓄計画）"><Select value={planId} options={buys.map((p) => p.id)} labels={Object.fromEntries(buys.map((p) => [p.id, p.name]))} onChange={setPlanId} /></Field>
           <div className="btns"><button className="btn sm" onClick={link}>計画連携</button></div>
         </div>
       )}
