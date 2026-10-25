@@ -12,7 +12,7 @@ export function PartSheet({ part, onClose, onRow }: { part: Part; onClose: () =>
   const [stack, setStack] = useState<Part[]>([part]);
   const cur = stack[stack.length - 1];
   return (
-    <Sheet title={stack.map((p) => p.label).join(" › ")} onClose={onClose}>
+    <Sheet title={stack.map((p) => p.label).join(" › ")} onClose={onClose} onBack={stack.length > 1 ? () => setStack(stack.slice(0, -1)) : undefined}>
       {cur.parts && cur.parts.length > 0 && (
         <div className="panel formula">
           {cur.parts.map((p, i) => (
@@ -37,10 +37,6 @@ export function PartSheet({ part, onClose, onRow }: { part: Part; onClose: () =>
           ))}
         </div></div>
       )}
-      <div className="btns">
-        {stack.length > 1 && <button className="btn ghost" onClick={() => setStack(stack.slice(0, -1))}>戻る</button>}
-        <button className="btn ghost" onClick={onClose}>閉じる</button>
-      </div>
     </Sheet>
   );
 }

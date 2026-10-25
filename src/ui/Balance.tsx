@@ -63,7 +63,6 @@ export function BalanceSheet({ store, data, today, onClose }: { store: Store; da
           ))}</tbody></table>
         </>
       )}
-      <div className="btns"><button className="btn ghost" onClick={onClose}>閉じる</button></div>
     </Sheet>
   );
 }

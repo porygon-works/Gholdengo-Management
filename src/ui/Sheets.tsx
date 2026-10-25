@@ -294,7 +294,6 @@ export function BillSheet({ store, data, entry, onClose }: { store: Store; data:
       <div className="btns">
         <button className="btn" onClick={() => val !== "" && set(val)}>確定にする</button>
         {confirmed && <button className="btn ghost" onClick={() => set(null)}>見込に戻す</button>}
-        <button className="btn ghost" onClick={onClose}>閉じる</button>
       </div>
     </Sheet>
   );
