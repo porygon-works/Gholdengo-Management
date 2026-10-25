@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACCOUNT_GROUP_LABEL, accountFlow, accountNow, applyLabels, CARD_GROUP_LABEL, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, computeMonth, DEFAULT_SETTINGS, findMerges,
-  goalSchedule, holidays, isBusinessDay, missingRecurring, monthBase, nextPayday, nextPayments, normalizeShop,
-  recurringDate, recurringDue, ruleFor, shiftBusiness, syncBills,
-  type AccountEntry, type CardEntry, type Data, type Goal, type Recurring,
+  ACCOUNT_GROUP_LABEL, accountNow, applyLabels, CARD_GROUP_LABEL, PAY_GROUP_LABEL, accountsWithBills, billsFor, budgetsFor, cardPayDate, categorize, DEFAULT_SETTINGS, findMerges,
+  holidays, isBusinessDay, missingRecurring, normalizeShop,
+  recurringDate, recurringDue, ruleFor, shiftBusiness, syncBills, emptyV5,
+  type AccountEntry, type CardEntry, type Data, type Recurring,
 } from "./index";
 
 // 値はすべて作り物（このリポジトリは公開されている）
@@ -18,11 +18,7 @@ const A = (p: Partial<AccountEntry>): AccountEntry => ({
   id: p.id ?? `a${++n}`, account: "bank", direction: "out", status: "confirmed", group: "variable", category: "食料品", name: "", memo: "", date: "2026-10-10",
   amount: 1000, source: "manual", source_ref: null, recurring_id: null, goal_id: null, card: null, pair_id: null, locked: false, ...p,
 });
-const G = (p: Partial<Goal>): Goal => ({
-  id: p.id ?? `g${++n}`, kind: "repay", name: "リボ", card: "saison", balance: 30000, as_of: "2026-10-19", target: 0, monthly: 10000, day: 27,
-  start_month: null, end_month: null, lumps: [], active: true, sort: 0, ...p,
-});
-const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], plans: [], debts: [], funds: [], months: [], budgets: [], rules: [], settings: S, ...p });
+const D = (p: Partial<Data>): Data => ({ accounts: [], cards: [], balances: [], recurring: [], goals: [], plans: [], debts: [], funds: [], months: [], budgets: [], rules: [], settings: S, ...p, v5: p.v5 ?? emptyV5() });
 const bal = (p: Partial<Data["balances"][number]> = {}) => ({ id: "b", date: "2026-10-19", bank: 300000, cash: 10000, paypay: 0, memo: "", ...p });
 
 describe("日付と祝日", () => {
@@ -44,8 +40,6 @@ describe("日付と祝日", () => {
     expect(cardPayDate("2026-08", S)).toBe("2026-09-28");
     expect(cardPayDate("2026-10", S, "saison")).toBe("2026-11-04");
     expect(cardPayDate("2026-12", S, "saison")).toBe("2027-01-04");
-    expect(nextPayday(S, "2026-10-21")).toBe("2026-11-16");
-    expect(nextPayday(S, "2026-10-14")).toBe("2026-10-15");
   });
 });
 
@@ -160,74 +154,6 @@ describe("クレカの請求（口座明細のクレカ支払い）", () => {
   });
 });
 
-describe("今月の予算と残り予算", () => {
-  const fixed = [{ month: "2026-10", category: "家賃", amount: 70000 }, { month: "2026-10", category: "通信", amount: 5000 }];
-  it("予算の元：給与・追加予算は口座明細の入金、固定費は固定費の予算、計画の分は計画の支払いと予算から入れる分。決めた予算があればそれ", () => {
-    const d = D({
-      budgets: fixed,
-      plans: [{ id: "p1", kind: "repay", name: "リボ", use_date: "2026-12-16", target: 0, done: false, sort: 0 }, { id: "p2", kind: "save", name: "貯金", use_date: null, target: 100000, done: false, sort: 1 }],
-      funds: [{ id: "f1", plan_id: "p2", source: "budget", name: "", date: "2026-11-26", budget_month: "2026-10", amount: 20000, status: "plan" }, { id: "f2", plan_id: "p2", source: "bonus", name: "", date: "2026-10-30", budget_month: null, amount: 5000, status: "plan" }],
-      accounts: [
-        A({ direction: "in", group: "salary", amount: 260000, date: "2026-10-15" }),
-        A({ direction: "in", group: "extra", amount: 5000, date: "2026-10-20", status: "plan" }),
-        A({ direction: "in", group: "refund", amount: 16000, date: "2026-10-25" }),
-        A({ direction: "in", group: "other", name: "売却代金", amount: 40000, date: "2026-10-20" }),
-        A({ group: "other", category: null, amount: 10000, date: "2026-11-04", status: "plan", plan_id: "p1", plan_role: "pay", budget_month: "2026-10", source: "plan" }),
-        A({ group: "other", category: null, amount: 99000, date: "2026-12-16", status: "plan", plan_id: "p1", plan_role: "lump", source: "plan" }),
-      ],
-    });
-    const b = monthBase(d, "2026-10");
-    expect([b.salary, b.extra, b.fixed, b.plan, b.manual]).toEqual([260000, 5000, 75000, 30000, null]);
-    expect(b.T).toBe(260000 + 5000 - 75000 - 30000);
-    const m = monthBase({ ...d, months: [{ month: "2026-10", budget: 90000, memo: "" }] }, "2026-10");
-    expect([m.T, m.auto, m.manual]).toEqual([90000, b.auto, 90000]);
-    // まとめて払う行は予算から引かない（確保額から払う）
-    expect(monthBase(d, "2026-12").plan).toBe(0);
-  });
-  it("残り予算 ＝ 予算 − クレカの変動費 − 口座の変動費の出金（自分の分・予定を含む）− 固定費の超過", () => {
-    const d = D({
-      budgets: [...fixed, { month: "2026-10", category: "食料品", amount: 30000 }],
-      accounts: [
-        A({ direction: "in", group: "salary", amount: 200000, date: "2026-10-15" }),
-        A({ account: "wallet", amount: 800, category: "食料品", date: "2026-10-11" }),
-        A({ amount: 3000, category: "交通", date: "2026-10-12", name: "PayPayチャージ" }),
-        A({ amount: 5500, group: "fixed", category: "通信", date: "2026-10-25", status: "plan" }),
-        A({ amount: 263000, group: "card", category: null, date: "2026-10-26" }), // クレカ支払いは数えない
-      ],
-      cards: [
-        C({ amount: 10000, tatekae: 6000, category: "外食" }),
-        C({ amount: 2000, category: null }),
-        C({ amount: 700, status: "plan", category: "食料品", date: "2026-10-30" }),
-        C({ amount: 70000, group: "fixed", category: "家賃", date: "2026-10-27", card: "saison" }),
-        C({ amount: 9000, group: "tatekae", category: null }),
-      ],
-    });
-    const v = computeMonth(d, "2026-10", "2026-10-21");
-    expect([v.U, v.P, v.fixedOver]).toEqual([800 + 3000 + 4000 + 2000, 700, 500]);
-    expect(v.R).toBe(v.T - v.U - v.P - 500);
-    expect(v.unclassified).toHaveLength(1);
-    expect(v.outsideCards.map((e) => e.group)).toEqual(["tatekae"]);
-    expect(v.cats.find((c) => c.cat === "予備")!.unclassified).toBe(2000);
-  });
-  it("固定費の予算がなければ、定期マスタの額、それもなければその月の明細の合計", () => {
-    const d = D({ cards: [C({ group: "fixed", category: "家賃", amount: 70000, date: "2026-11-27", status: "plan", card: "saison" })] });
-    expect(budgetsFor(d, "2026-11").get("家賃")).toBe(70000);
-    expect(budgetsFor(d, "2026-12").has("家賃")).toBe(false);
-  });
-});
-
-describe("前の版の目標マスタ（計画に写すときに使う）", () => {
-  it("返済：残高の日より後の支払いから、残高が0になるまで。臨時の返済で早く終わる", () => {
-    const g = G({ balance: 35000, monthly: 10000, as_of: "2026-10-19", card: "saison", lumps: [{ date: "2026-12-16", amount: 99999, memo: "賞与から" }] });
-    const m = goalSchedule(g, S, "2026-10", 4);
-    expect(m.map((x) => [x.ym, x.pay, x.lump, x.left])).toEqual([["2026-11", 10000, 0, 25000], ["2026-12", 10000, 15000, 0], ["2027-01", 0, 0, 0], ["2027-02", 0, 0, 0]]);
-  });
-  it("積立：始める月から目標額まで", () => {
-    const save = G({ kind: "save", balance: 0, target: 50000, monthly: 20000, start_month: "2027-01" });
-    expect(goalSchedule(save, S, "2026-12", 5).map((x) => x.pay)).toEqual([0, 20000, 20000, 10000, 0]);
-  });
-});
-
 describe("口座", () => {
   it("いまの口座と財布：最後の残高 ＋ そのあと今日までの確定した口座明細。予定は数えない", () => {
     const d = D({
@@ -247,48 +173,6 @@ describe("口座", () => {
     // 残高を直した日と同じ日の明細は、直したあとに入れたものだけ数える
     const fixed = D({ balances: [bal({ date: "2026-10-21", bank: 400000, at: "2026-10-21T03:00:00Z" })], accounts: [A({ amount: 1000, date: "2026-10-21", at: "2026-10-21T02:00:00Z" }), A({ amount: 2000, date: "2026-10-21", at: "2026-10-21T04:00:00Z" })] });
     expect(accountNow(fixed, "2026-10-21")!.bank).toBe(398000);
-  });
-  it("口座の今後の動き：いまの口座から、給料日の前日までの口座明細（まだ行のないクレカ支払いも）。過ぎた予定は今日に", () => {
-    const d = D({
-      balances: [bal()],
-      accounts: [
-        A({ direction: "in", group: "other", amount: 40000, date: "2026-10-20", name: "売却代金" }),
-        A({ amount: 30000, group: "fixed", category: "奨学金", name: "奨学金", date: "2026-10-27", status: "plan" }),
-        A({ amount: 500, name: "忘れていた予定", date: "2026-10-18", status: "plan" }),
-        A({ direction: "in", group: "salary", amount: 250000, date: "2026-11-16", status: "plan" }),
-      ],
-      cards: [C({ amount: 50000, date: "2026-09-10" }), C({ card: "saison", group: "fixed", category: "家賃", amount: 70000, date: "2026-10-27", status: "plan" })],
-    });
-    const f = accountFlow(d, "2026-10-21")!;
-    expect(f.now.bank).toBe(340000);
-    expect(f.rows.map((r) => [r.date, r.entry.name, r.delta, r.balance])).toEqual([
-      ["2026-10-21", "忘れていた予定", -500, 339500],
-      ["2026-10-26", "三井 9月分", -50000, 289500],
-      ["2026-10-27", "奨学金", -30000, 259500],
-      ["2026-11-04", "セゾン 10月分", -70000, 189500],
-    ]);
-    expect(f.last).toBe(189500);
-    expect(accountsWithBills(d, "2026-10-21", ["2026-10", "2026-11"]).filter((e) => e.group === "card").map((e) => e.name)).toEqual(["三井 9月分", "セゾン 10月分"]);
-  });
-  it("来月の支払い予定：大費目ごとに分ける。クレカは中身の明細で、一部の立替は立替へ。クレカ支払いの行は数えない", () => {
-    const d = D({
-      cards: [
-        C({ card: "saison", group: "fixed", category: "家賃", name: "家賃", amount: 70000, date: "2026-10-27", status: "plan" }),
-        C({ card: "saison", group: "installment", category: null, name: "リボの返済", amount: 10000, date: "2026-10-31", status: "plan" }),
-        C({ amount: 4000, date: "2026-10-10" }),
-        C({ amount: 3000, date: "2026-10-30", status: "plan", category: "外食", tatekae: 1000 }),
-        C({ group: "tatekae", category: null, amount: 6000, date: "2026-10-15" }),
-      ],
-      accounts: [
-        A({ amount: 30000, group: "fixed", category: "奨学金", name: "奨学金", date: "2026-11-27", status: "plan" }),
-        A({ amount: 2000, group: "fixed", category: "保険・共済", name: "共済", date: "2026-11-09", status: "plan" }),
-        A({ amount: 99999, group: "card", category: null, card: "smbc", date: "2026-11-26", status: "plan", source_ref: "bill:smbc:2026-11-26" }),
-      ],
-    });
-    const n2 = nextPayments(d, "2026-11");
-    expect(n2.groups.map((g) => [g.group, g.amount, g.items.length])).toEqual([["fixed", 102000, 3], ["variable", 6000, 2], ["installment", 10000, 1], ["tatekae", 7000, 2]]);
-    expect(n2.groups[0].items.map((x) => [x.date, x.name, x.from])).toEqual([["2026-11-04", "家賃", "セゾン"], ["2026-11-09", "共済", "口座"], ["2026-11-27", "奨学金", "口座"]]);
-    expect(n2.total).toBe(125000);
   });
 });
 

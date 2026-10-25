@@ -1,4 +1,4 @@
-// ホーム画面のアイコン（緑の地に金色のコイン）を PNG で作る。npm run icons
+// ホーム画面のアイコン（黒の地に金色のコイン）を PNG で作る。npm run icons
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
@@ -13,13 +13,13 @@ function png(size) {
     raw[y * (size * 4 + 1)] = 0;
     for (let x = 0; x < size; x++) {
       const dx = (x + 0.5 - c) / size, dy = (y + 0.5 - c) / size, r = Math.hypot(dx, dy);
-      let col = [0x1d, 0x6a, 0x50];
+      let col = [0x1d, 0x1b, 0x16];
       if (r < 0.34) col = [0xe0, 0xb4, 0x3c];
       if (r < 0.34 && r > 0.29) col = [0xc4, 0x93, 0x22];
       // 円の中の「¥」：縦棒と2本の横棒と V 字
       const ax = Math.abs(dx);
       const yen = r < 0.29 && ((ax < 0.025 && dy > -0.04 && dy < 0.17) || (Math.abs(dy - 0.02) < 0.018 && ax < 0.1) || (Math.abs(dy - 0.08) < 0.018 && ax < 0.1) || (dy < -0.02 && dy > -0.17 && Math.abs(ax - (-dy - 0.02) * 0.75) < 0.03));
-      if (yen) col = [0x1d, 0x6a, 0x50];
+      if (yen) col = [0x1d, 0x1b, 0x16];
       const o = y * (size * 4 + 1) + 1 + x * 4;
       raw[o] = col[0]; raw[o + 1] = col[1]; raw[o + 2] = col[2]; raw[o + 3] = 255;
     }

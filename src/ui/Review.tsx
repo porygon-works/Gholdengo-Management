@@ -1,7 +1,7 @@
 import { findMerges, missingCardEntries, overduePlans, type CardEntry } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { CARD_SOURCE_LABEL, cardTitle, Empty, md, STATUS_LABEL, toast, yen } from "./common";
-import { AccountRow } from "./Ledger";
+import { AccountRow } from "./Rows";
 import type { Open } from "./Sheets";
 
 const mailCards = (d: AppData) => d.cards.filter((e) => e.card === d.settings.cards[0].id);
@@ -34,7 +34,7 @@ export function ReviewView({ store, data, today, onOpen }: { store: Store; data:
     <>
       {review.length > 0 && (
         <section>
-          <h2>同じものかもしれないクレカ明細 <small>{review.length}件</small></h2>
+          <h2>重複候補 <small>{review.length}件</small></h2>
           {review.map((r) => (
             <div className="panel" key={r.entry.id}>
               <div className="note">{r.reason}</div>
@@ -43,17 +43,17 @@ export function ReviewView({ store, data, today, onOpen }: { store: Store; data:
               {r.candidates.map((c) => (
                 <div key={c.id} style={{ display: "grid", gap: 6 }}>
                   <div className="list"><Line e={c} data={data} onOpen={onOpen} /></div>
-                  <div className="btns"><button className="btn sm" onClick={() => merge(r.entry, c)}>同じもの（まとめる）</button></div>
+                  <div className="btns"><button className="btn sm" onClick={() => merge(r.entry, c)}>統合</button></div>
                 </div>
               ))}
-              <div className="btns"><button className="btn sm ghost" onClick={() => separate(r.entry, r.candidates)}>どれとも別のもの</button></div>
+              <div className="btns"><button className="btn sm ghost" onClick={() => separate(r.entry, r.candidates)}>別取引</button></div>
             </div>
           ))}
         </section>
       )}
       {overdue.length > 0 && (
         <section>
-          <h2>日付が過ぎた口座の予定 <small>確定にするか、消してください</small></h2>
+          <h2>期限切れの予定 <small>確定にするか、消してください</small></h2>
           <div className="panel"><div className="list">{overdue.map((e) => <AccountRow key={e.id} e={e} onOpen={onOpen} showCat />)}</div></div>
         </section>
       )}
@@ -68,7 +68,7 @@ export function ReviewView({ store, data, today, onOpen }: { store: Store; data:
       )}
       {mails.length > 0 && (
         <section>
-          <h2>読めなかったメール <small>{mails.length}件</small></h2>
+          <h2>未読込メール <small>{mails.length}件</small></h2>
           {mails.map((m) => (
             <div className="panel" key={m.id}>
               <b>{m.title}</b>

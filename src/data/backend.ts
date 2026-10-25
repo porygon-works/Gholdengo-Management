@@ -3,16 +3,21 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // データの置き場所。Supabase の設定があれば Supabase、なければブラウザの中（お試しモード）
 
 // entries・card_bills・debts は前の版（v2）の表。新しい表（account_entries・card_entries・goals）へ写すために読む
-export type Table = "account_entries" | "card_entries" | "goals" | "entries" | "balances" | "card_bills" | "recurring" | "budgets" | "rules" | "debts" | "settings" | "review" | V4Table;
+export type Table = "account_entries" | "card_entries" | "goals" | "entries" | "balances" | "card_bills" | "recurring" | "budgets" | "rules" | "debts" | "settings" | "review" | V4Table | V5Table;
 /** v4 の表（0007_plans_months.sql）。まだ作っていなければ空として読む */
 export type V4Table = "plans" | "plan_debts" | "plan_funds" | "months";
 export const V4_TABLES: V4Table[] = ["plans", "plan_debts", "plan_funds", "months"];
+/** v5 の表（0008_v5.sql）。まだ作っていなければ空として読む */
+export type V5Table = "v5_plans" | "v5_loans" | "v5_loan_balances" | "v5_moves" | "v5_months";
+export const V5_TABLES: V5Table[] = ["v5_plans", "v5_loans", "v5_loan_balances", "v5_moves", "v5_months"];
+/** まだ作っていなければ空として読む表 */
+const OPTIONAL: Table[] = [...V4_TABLES, ...V5_TABLES];
 /** 書くだけで読まない表（Claude が読むための書き出し） */
 export type WriteOnly = "snapshots";
-export const TABLES: Table[] = ["account_entries", "card_entries", "goals", "entries", "balances", "card_bills", "recurring", "budgets", "rules", "debts", "settings", "review", ...V4_TABLES];
+export const TABLES: Table[] = ["account_entries", "card_entries", "goals", "entries", "balances", "card_bills", "recurring", "budgets", "rules", "debts", "settings", "review", ...V4_TABLES, ...V5_TABLES];
 
 export type Row = Record<string, unknown>;
-export type Raw = Record<Table, Row[]> & { missing?: V4Table[] };
+export type Raw = Record<Table, Row[]> & { missing?: (V4Table | V5Table)[] };
 
 export interface Backend {
   mode: "supabase" | "local";
@@ -22,7 +27,7 @@ export interface Backend {
   update(t: Table, id: string, patch: Row): Promise<void>;
   remove(t: Table, id: string): Promise<void>;
   /** budgets・settings・snapshots のように id のない表の書き込み */
-  upsertKeyed(t: "budgets" | "settings" | "months" | WriteOnly, rows: Row[]): Promise<void>;
+  upsertKeyed(t: "budgets" | "settings" | "months" | "v5_months" | WriteOnly, rows: Row[]): Promise<void>;
   removeBudget(month: string, category: string): Promise<void>;
 }
 
@@ -44,14 +49,14 @@ function supabaseBackend(sb: SupabaseClient): Backend {
     mode: "supabase",
     async load() {
       const out = {} as Raw;
-      const missing: V4Table[] = [];
+      const missing: (V4Table | V5Table)[] = [];
       await Promise.all(TABLES.map(async (t) => {
         // 1000行ずつ全部読む
         const rows: Row[] = [];
         for (let from = 0; ; from += 1000) {
           const r = await sb.from(t).select("*").range(from, from + 999);
-          // v4 の表がまだなければ（SQL を流す前）、空として読む
-          if (r.error && (V4_TABLES as string[]).includes(t)) { missing.push(t as V4Table); break; }
+          // v4・v5 の表がまだなければ（SQL を流す前）、空として読む
+          if (r.error && OPTIONAL.includes(t)) { missing.push(t as V4Table | V5Table); break; }
           check(r);
           rows.push(...(r.data as Row[]));
           if ((r.data?.length ?? 0) < 1000) break;
@@ -73,7 +78,7 @@ function supabaseBackend(sb: SupabaseClient): Backend {
     async upsertKeyed(t, rows) {
       if (!rows.length) return;
       const user_id = await uid();
-      check(await sb.from(t).upsert(rows.map((r) => ({ ...r, user_id })), { onConflict: t === "budgets" ? "user_id,month,category" : t === "months" ? "user_id,month" : "user_id" }));
+      check(await sb.from(t).upsert(rows.map((r) => ({ ...r, user_id })), { onConflict: t === "budgets" ? "user_id,month,category" : t === "months" || t === "v5_months" ? "user_id,month" : "user_id" }));
     },
     async removeBudget(month, category) { check(await sb.from("budgets").delete().eq("month", month).eq("category", category)); },
   };
@@ -102,6 +107,9 @@ const DEFAULTS: Partial<Record<Table, Row>> = {
   plans: { name: "", use_date: null, target: 0, done: false, sort: 0 },
   plan_debts: { name: "", balance: 0, sort: 0 },
   plan_funds: { name: "", budget_month: null, amount: 0, status: "plan" },
+  v5_plans: { name: "", target: 0, due_date: null, monthly: 0, start_month: null, draw_order: 0, no_draw: false, done: false, sort: 0 },
+  v5_loans: { plan_id: null, name: "", card: null, monthly: 0, pay_day: null, sort: 0 },
+  v5_moves: { bonus_entry_id: null, entry_kind: null, entry_id: null, memo: "" },
 };
 
 function localBackend(): Backend {
@@ -135,6 +143,10 @@ function localBackend(): Backend {
         for (const e of d.account_entries) if (e.plan_id === id) { e.plan_id = null; e.debt_id = null; }
       }
       if (t === "plan_debts") for (const e of d.account_entries) if (e.debt_id === id) e.debt_id = null;
+      // v5：計画を消したら出し入れも消し、借入のつながりを外す。借入を消したら残高の記録も消す（Supabase の on delete と同じ）
+      if (t === "v5_plans") { d.v5_moves = d.v5_moves.filter((x) => x.plan_id !== id); for (const l of d.v5_loans) if (l.plan_id === id) l.plan_id = null; }
+      if (t === "v5_loans") d.v5_loan_balances = d.v5_loan_balances.filter((x) => x.loan_id !== id);
+      if (t === "account_entries") d.v5_moves = d.v5_moves.filter((x) => x.bonus_entry_id !== id);
       writeLocal(d);
     },
     async upsertKeyed(t, rows) {
@@ -142,8 +154,8 @@ function localBackend(): Backend {
       if (t === "snapshots") { (d as unknown as Record<string, Row[]>).snapshots = rows.slice(-1); writeLocal(d); return; }
       for (const r of rows) {
         if (t === "settings") { d.settings = [{ ...(d.settings[0] || {}), ...r }]; continue; }
-        const list = t === "months" ? d.months : d.budgets;
-        const i = list.findIndex((x) => x.month === r.month && (t === "months" || x.category === r.category));
+        const list = t === "months" ? d.months : t === "v5_months" ? d.v5_months : d.budgets;
+        const i = list.findIndex((x) => x.month === r.month && (t !== "budgets" || x.category === r.category));
         if (i >= 0) list[i] = { ...list[i], ...r };
         else list.push(r);
       }

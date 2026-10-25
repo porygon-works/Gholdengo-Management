@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "../engine";
-import { planOps } from "./ops";
+import { DEFAULT_SETTINGS, emptyV5 } from "../engine";
+import { planOps, simulateOps } from "./ops";
 import type { AppData } from "./store";
 
 // 値はすべて作り物
@@ -10,7 +10,7 @@ const d: AppData = {
   balances: [],
   recurring: [{ id: "r1", name: "奨学金", kind: "expense", group: "fixed", category: "奨学金", amount: 30000, day: 27, shift: "next", pay: "bank", card: null, shop: "", every: 1, start_month: null, end_month: null, active: true }],
   goals: [],
-  plans: [{ id: "p1", kind: "buy", name: "新しいPC", use_date: "2027-03-30", target: 60000, done: false, sort: 0 }],
+  plans: [],
   debts: [],
   funds: [],
   months: [],
@@ -19,27 +19,28 @@ const d: AppData = {
   rules: [{ id: "u1", pattern: "サンプル", category: "食料品" }],
   settings: DEFAULT_SETTINGS,
   review: [],
+  v5: { ...emptyV5(), plans: [{ id: "p1", kind: "buy", name: "新しいPC", target: 60000, due_date: "2027-03-30", monthly: 0, start_month: null, draw_order: 1, no_draw: false, done: false, sort: 0 }] },
 };
-const ops = (list: unknown[]) => ({ format: "gholdengo-ops-v1", note: "テスト", ops: list });
+const ops = (list: unknown[]) => ({ format: "gholdengo-ops-v2", note: "テスト", ops: list });
 
-describe("Claude との相談の取り込み（gholdengo-ops-v1）", () => {
+describe("Claude との相談の取り込み（gholdengo-ops-v2）", () => {
   it("予算・目標・定期・明細を、足す・直す・消すに分けて出す", () => {
     const r = planOps(d, ops([
       { op: "set", table: "budgets", key: { month: "2026-11", category: "食料品" }, data: { amount: 18000 } },
-      { op: "set", table: "plans", key: { name: "新しいPC" }, data: { target: 80000 } },
+      { op: "set", table: "v5_plans", key: { name: "新しいPC" }, data: { target: 80000 } },
       { op: "set", table: "recurring", key: { name: "年払いのサービス" }, data: { kind: "expense", group: "fixed", category: "サブスク", amount: 2400, day: 10, pay: "card", every: 12, start_month: "2026-12" } },
       { op: "delete", table: "recurring", key: { name: "奨学金" } },
       { op: "set", table: "account_entries", key: { ref: "claude:bonus-2026-12" }, data: { direction: "in", group: "other", name: "賞与", date: "2026-12-10", amount: 100000 } },
       { op: "set", table: "settings", data: { safety: 10000 } },
     ]));
     expect(r.errors).toEqual([]);
-    expect(r.changes.map((c) => [c.table, c.kind])).toEqual([["budgets", "add"], ["plans", "update"], ["recurring", "add"], ["recurring", "delete"], ["account_entries", "add"], ["settings", "update"]]);
+    expect(r.changes.map((c) => [c.table, c.kind])).toEqual([["budgets", "add"], ["v5_plans", "update"], ["recurring", "add"], ["recurring", "delete"], ["account_entries", "add"], ["settings", "update"]]);
     expect(r.changes[0].label).toBe("予算 2026-11 食料品：¥17,000 → ¥18,000"); // 引き継いでいる額から
     expect(r.changes[1].label).toContain("target：¥60,000 → ¥80,000");
   });
   it("書けない項目・見つからない行・足すのに足りない項目はエラーにして、何も変えない", () => {
     const r = planOps(d, ops([
-      { op: "set", table: "plans", key: { name: "新しいPC" }, data: { user_id: "x" } },
+      { op: "set", table: "v5_plans", key: { name: "新しいPC" }, data: { user_id: "x" } },
       { op: "delete", table: "rules", key: { pattern: "ない店" } },
       { op: "set", table: "card_entries", key: { ref: "claude:x" }, data: { name: "日付がない" } },
       { op: "set", table: "budgets", key: { month: "11月", category: "食料品" }, data: { amount: 1 } },
@@ -47,5 +48,24 @@ describe("Claude との相談の取り込み（gholdengo-ops-v1）", () => {
     ]));
     expect(r.errors).toHaveLength(5);
     expect(planOps(d, { format: "gholdengo-import-v1" }).errors).toHaveLength(1);
+  });
+
+  it("v5：余裕額から入れる・月の予算を決める・リボに回す", () => {
+    const r = planOps(d, ops([
+      { op: "set", table: "v5_moves", key: { ref: "claude:pc-1" }, data: { plan: "新しいPC", kind: "manual", amount: 20000, date: "2026-11-05" } },
+      { op: "set", table: "v5_months", key: { month: "2026-12" }, data: { budget: 150000 } },
+      { op: "set", table: "card_entries", key: { ref: "claude:rent" }, data: { card: "saison", date: "2026-11-01", amount: 80000, group: "purchase", category: "家賃" } },
+    ]));
+    expect(r.errors).toEqual([]);
+    expect(r.changes.map((c) => [c.table, c.kind])).toEqual([["v5_moves", "add"], ["v5_months", "add"], ["card_entries", "add"]]);
+    const after = simulateOps(d, r.changes);
+    expect(after.v5.moves[0]).toMatchObject({ plan_id: "p1", kind: "manual", amount: 20000 });
+    expect(after.v5.months[0]).toEqual({ month: "2026-12", budget: 150000, source: "decided" });
+    expect(after.cards[0]).toMatchObject({ group: "purchase", amount: 80000 });
+    expect(after.cards[0].revolved_at).toBeTruthy(); // Claude からリボに回したときも、回した日を持つ
+    expect(d.v5.moves).toEqual([]);
+  });
+  it("v1 の形式は古いので取り込まない", () => {
+    expect(planOps(d, { format: "gholdengo-ops-v1", ops: [] }).errors[0]).toContain("古い形式");
   });
 });

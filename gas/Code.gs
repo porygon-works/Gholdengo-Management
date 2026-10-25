@@ -44,7 +44,7 @@ function exportSnapshot() {
   var snap = get_(c, 'snapshots?select=data,updated_at&user_id=eq.' + c.owner)[0];
   var since = Utilities.formatDate(new Date(Date.now() - 45 * 864e5), 'Asia/Tokyo', 'yyyy-MM-dd');
   var cards = get_(c, 'card_entries?select=id,card,status,date,amount,group,category,name,shop,source,merged_into&deleted=eq.false&date=gte.' + since + '&user_id=eq.' + c.owner + '&order=date.desc');
-  var out = snap ? snap.data : { format: 'gholdengo-snapshot-v1' };
+  var out = snap ? snap.data : { format: 'gholdengo-snapshot-v2' };
   out.appSavedAt = snap ? snap.updated_at : null;
   out.gasExportedAt = new Date().toISOString();
   out.note = 'summary はアプリを最後に開いた時点（appSavedAt）の計算。latestCardEntries は GAS が書き出した時点（gasExportedAt）のクレカ明細（直近45日）';

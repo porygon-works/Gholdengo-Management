@@ -21,7 +21,6 @@ export const ownCost = (e: { amount: number; tatekae?: number }) => Math.max(0, 
  * クレカはカードごと（"card:smbc"）、現金は財布、PayPay は口座から（チャージした額を使ったものとして数える）、口座は口座払い
  */
 export type Pay = string;
-export const payOptions = (s: Settings): Pay[] => [...s.cards.map((c) => `card:${c.id}`), "wallet", "paypay", "bank"];
 export const payLabels = (s: Settings): Record<Pay, string> => ({ ...Object.fromEntries(s.cards.map((c) => [`card:${c.id}`, `クレカ（${c.name}）`])), wallet: "現金", paypay: "PayPay", bank: "口座" });
 export const cardOfPay = (p: Pay) => (p.startsWith("card:") ? p.slice(5) : null);
 
@@ -80,7 +79,6 @@ export function NumInput({ value, onChange, placeholder, autoFocus, id, plain }:
 
 /** 金額の表示：¥ をつける */
 export const money = (n: number) => (n < 0 ? "−¥" + yen(-n) : "¥" + yen(n));
-
 
 export function Select<T extends string>({ value, options, onChange, labels }: { value: T; options: readonly T[]; onChange: (v: T) => void; labels?: Partial<Record<T, string>> }) {
   return (

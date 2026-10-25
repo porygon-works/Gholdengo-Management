@@ -1,43 +1,49 @@
-import { accountFlow, addMonths, computeMonth, forecast, monthBase, nextPayments, PAY_GROUP_LABEL, PLAN_KIND_LABEL, planDebts, planEntries, planFunds, planStatus, reserveAt, debtLeft, ymOf } from "../engine";
+import { addMonths, budgetView, lastDay, loanAt, loanCorrections, outlook, PLAN_KIND_LABEL, plannedBonus, repayView, savedAt, slackAt, ymOf, type Part } from "../engine";
 import type { AppData } from "./store";
+import { OPS_FORMAT } from "./ops";
 
-// Claude が読むための書き出し（format: gholdengo-snapshot-v1）。アプリが開くたびに Supabase の snapshots に保存し、
+// Claude が読むための書き出し（format: gholdengo-snapshot-v2）。アプリが開くたびに Supabase の snapshots に保存し、
 // GAS が1時間に1回 Google ドライブの Gholdengo/gholdengo-snapshot.json に置く。書き方は docs/OPS.md
 
+export const SNAPSHOT_FORMAT = "gholdengo-snapshot-v2";
+
+/** 内訳（アプリでタップすると出る式と同じもの）。行は多くなりすぎないよう先頭だけ */
+const tree = (p: Part): unknown => ({
+  name: p.label, amount: p.amount, sign: p.sign < 0 ? "−" : "＋",
+  ...(p.parts?.length ? { parts: p.parts.map(tree) } : {}),
+  ...(p.rows?.length ? { rows: p.rows.slice(0, 30).map((r) => ({ date: r.date, name: r.name, amount: r.amount, plan: r.plan })), ...(p.rows.length > 30 ? { moreRows: p.rows.length - 30 } : {}) } : {}),
+});
+
 /**
- * アプリが計算したまとめ（画面に出している数）。Claude がこれを読めば、自分で計算しなくてよい
+ * アプリが計算したまとめ（画面に出している数と、その内訳）。Claude がこれを読めば、自分で計算しなくてよい
  */
 export function summary(d: AppData, today: string) {
   const ym = ymOf(today), next = addMonths(ym, 1);
-  const v = computeMonth(d, ym, today);
-  const f = accountFlow(d, today);
-  const n = nextPayments(d, next);
-  const nb = monthBase(d, next);
-  const fc = forecast(d, today);
+  const month = (m: string) => {
+    const v = budgetView(d, m, today);
+    return {
+      month: m, budget: v.budget, budgetSource: v.source, guide: tree(v.guide), budgetLeft: tree(v.left),
+      categories: v.cats.filter((c) => c.budget || c.used || c.planned).map((c) => ({ category: c.cat, fixed: c.fixed, budget: c.budget, used: c.used, planned: c.planned, left: c.left })),
+    };
+  };
+  const endYm = addMonths(ym, 6);
+  const days = d.balances.length ? outlook(d, today, today, `${endYm}-${String(lastDay(endYm)).padStart(2, "0")}`) : [];
   return {
     today,
-    thisMonth: {
-      month: ym, budget: v.T, remaining: v.R, variableUsed: v.U, variablePlanned: v.P, fixedOver: v.fixedOver,
-      base: { salary: v.base.salary, extra: v.base.extra, fixed: v.base.fixed, planMinus: v.base.plan, guide: v.base.auto, decided: v.base.manual },
-      categories: v.cats.filter((c) => c.budget || c.used || c.planned).map((c) => ({ category: c.cat, fixed: c.fixed, budget: c.budget, used: c.used, planned: c.planned, remaining: c.rem })),
-    },
-    account: f && {
-      bankNow: f.now.bank, walletNow: f.now.wallet, lastBalanceReport: f.now.base.date, nextPayday: f.end, leftBeforePayday: f.last, short: f.short,
-      flow: f.rows.map((r) => ({ date: r.date, name: r.entry.name || r.entry.category, amount: r.delta, balanceAfter: r.balance, status: r.entry.status, group: r.entry.group })),
-    },
-    nextMonthPayments: { month: next, total: n.total, groups: n.groups.map((g) => ({ group: PAY_GROUP_LABEL[g.group], amount: g.amount, items: g.items.map((x) => ({ date: x.date, name: x.name, from: x.from, amount: x.amount, plan: x.plan })) })) },
-    nextMonthBudget: { month: next, budget: nb.T, base: { salary: nb.salary, extra: nb.extra, fixed: nb.fixed, planMinus: nb.plan, guide: nb.auto, decided: nb.manual } },
-    // 確保額 ＝ 給料日の前日の口座残高（見込み）。計画ごとに入れた分と、予備
-    reserves: fc ? fc.eves.map((e) => reserveAt(d, fc, e)).filter(Boolean) : [],
-    plans: d.plans.map((p) => {
-      const st = planStatus(d, p, fc);
-      return {
-        id: p.id, name: p.name, kind: PLAN_KIND_LABEL[p.kind], useDate: p.use_date, need: st.need, collected: st.got, short: st.short, ok: st.ok, done: p.done,
-        debts: planDebts(d, p).map((x) => ({ name: x.name, balance: x.balance, asOf: x.as_of, left: debtLeft(d, p, x) })),
-        entries: planEntries(d, p).map((e) => ({ date: e.date, name: e.name, amount: e.amount, status: e.status, role: e.plan_role, card: e.card })),
-        funds: planFunds(d, p).map((f) => ({ date: f.date, source: f.source, name: f.name, amount: f.amount, status: f.status })),
-      };
+    slack: tree(slackAt(d, today, today)),
+    thisMonth: month(ym),
+    nextMonth: month(next),
+    loans: d.v5.loans.map((l) => ({ name: l.name, balance: tree(loanAt(d, l, today)), monthly: l.monthly, card: l.card, corrections: loanCorrections(d, l) })),
+    plans: d.v5.plans.map((p) => {
+      const base = { name: p.name, kind: PLAN_KIND_LABEL[p.kind], target: p.target, dueDate: p.due_date, monthly: p.monthly, drawOrder: p.draw_order, noDraw: p.no_draw, done: p.done };
+      if (p.kind === "repay") {
+        const r = repayView(d, p, today);
+        return { ...base, repay: r && { due: tree(r.due), bankThen: r.bankThen.amount, ok: r.ok, lowAfter: { date: r.lowAfter.label, amount: r.lowAfter.amount } } };
+      }
+      return { ...base, saved: tree(savedAt(d, p, today)), plannedBonus: plannedBonus(d, p) };
     }),
+    // 見通し：日ごとの口座残高と余裕額（先は見込み。予算どおりに使う前提）。週に1回と月末だけ
+    outlook: days.filter((x, i) => i % 7 === 0 || x.date.slice(8) === String(lastDay(ymOf(x.date)))),
   };
 }
 
@@ -45,20 +51,21 @@ export function summary(d: AppData, today: string) {
 export function snapshot(d: AppData, today: string) {
   const from = `${Number(today.slice(0, 4)) - 1}${today.slice(4, 7)}`;
   return {
-    format: "gholdengo-snapshot-v1",
+    format: SNAPSHOT_FORMAT,
     exportedAt: new Date().toISOString(),
-    howToChange: "変えたいときは docs/OPS.md の gholdengo-ops-v1 で書いて、アプリの「設定 → データ → Claude との相談を取り込む」で読み込む",
+    howToChange: `変えたいときは docs/OPS.md の ${OPS_FORMAT} で書いて、アプリの「設定 → データ → Claude との相談を取り込む」で読み込む`,
     summary: summary(d, today),
     settings: d.settings,
     budgets: d.budgets,
-    months: d.months,
-    plans: d.plans,
-    plan_debts: d.debts,
-    plan_funds: d.funds,
+    v5_months: d.v5.months,
+    v5_plans: d.v5.plans,
+    v5_loans: d.v5.loans,
+    v5_loan_balances: d.v5.balances,
+    v5_moves: d.v5.moves,
     recurring: d.recurring,
     rules: d.rules,
     balances: d.balances,
-    account_entries: d.accounts.filter((e) => e.date >= from).map(({ at: _a, ...e }) => e),
+    account_entries: d.accounts.filter((e) => e.date >= from && e.account === "bank").map(({ at: _a, ...e }) => e),
     card_entries: d.cards.filter((e) => e.date >= from && !e.merged_into).map(({ at: _a, ...e }) => e),
   };
 }
