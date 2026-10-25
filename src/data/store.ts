@@ -225,7 +225,7 @@ async function maintain(raw: Raw, d: AppData, today: string): Promise<boolean> {
     if (Object.keys(patch).length) { await backend.update("card_entries", e.id, patch); wrote = true; }
   }
   for (const e of d.accounts) {
-    if (e.status === "plan" && (e.source === "recurring" || e.source === "goal" || e.source === "plan") && e.date <= today) { await backend.update("account_entries", e.id, { status: "confirmed" }); wrote = true; }
+    if (e.status === "plan" && (e.source === "recurring" || e.source === "goal") && e.date <= today) { await backend.update("account_entries", e.id, { status: "confirmed" }); wrote = true; }
   }
   const mailCard = d.settings.cards[0].id;
   for (const e of d.cards) {
