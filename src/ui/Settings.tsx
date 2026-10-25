@@ -513,7 +513,7 @@ function Handover({ store, data }: { store: Store; data: AppData }) {
   const list = (rows: typeof h.remove, what: string) => rows.length > 0 && (
     <>
       <h2>{what} <small>{rows.length}件</small></h2>
-      <div className="list">{rows.map((e) => (
+      <div className="list">{[...rows].sort((x, y) => x.date.localeCompare(y.date)).map((e) => (
         <div key={e.id} className="row"><span className="d num">{md(e.date)}</span><span className="t"><div>{e.name || e.category || "―"}</div></span><span className="a num">{e.direction === "in" ? "＋" : "−"}{money(e.amount)}</span></div>
       ))}</div>
     </>

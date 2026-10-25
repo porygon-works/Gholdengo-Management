@@ -94,11 +94,11 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
   - `AccountGroup` に `"bonus"`。`IN_GROUPS` に足す。`ACCOUNT_GROUP_LABEL.bonus = "賞与"`
   - 変動費の費目の初めの値に「現金」を足す（`DEFAULT_SETTINGS.varCats`。設計書 §3.6）
 
-- [ ] **Step 1: 失敗するテストを書く** — `src/data/v5load.test.ts`：`toData(raw)`（`src/data/store.ts` の読み込みの変換。テストから使えるように export する）に v5 の表がない raw を渡すと `data.v5` が全部空配列になる。v5 の表に1行ずつ入った raw を渡すと、数値の列（`target`・`monthly`・`balance`・`amount`・`budget`）が number になっている。
-- [ ] **Step 2: テストを流して失敗を見る** — `npx vitest run src/data/v5load.test.ts` → FAIL（`v5` がない）
-- [ ] **Step 3: `0008_v5.sql` を書く** — 0007 と同じ形（`user_id default auth.uid()`、RLS の `own` ポリシー、`updated_at`）。`v5_months` は `(user_id, month)` が主キー。`v5_loan_balances.loan_id` と `v5_moves.plan_id` は `on delete cascade`。`account_entries` の大費目の check 制約を、`'bonus'` を足したものに作り直す（制約名は `pg_constraint` から引く `do $$ … $$`）。
-- [ ] **Step 4: 型と読み込みを足す** — `backend.ts` に `V5Table = "v5_plans"|"v5_loans"|"v5_loan_balances"|"v5_moves"|"v5_months"` を足し、`V4_TABLES` と同じく「なければ空」で読む。`upsertKeyed` に `v5_months` を足す。`store.ts` の変換で `data.v5` を作る。
-- [ ] **Step 5: テストを流して通るのを見る** — `npx vitest run src/data/v5load.test.ts` → PASS
+- [x] **Step 1: 失敗するテストを書く** — `src/data/v5load.test.ts`：`toData(raw)`（`src/data/store.ts` の読み込みの変換。テストから使えるように export する）に v5 の表がない raw を渡すと `data.v5` が全部空配列になる。v5 の表に1行ずつ入った raw を渡すと、数値の列（`target`・`monthly`・`balance`・`amount`・`budget`）が number になっている。
+- [x] **Step 2: テストを流して失敗を見る** — `npx vitest run src/data/v5load.test.ts` → FAIL（`v5` がない）
+- [x] **Step 3: `0008_v5.sql` を書く** — 0007 と同じ形（`user_id default auth.uid()`、RLS の `own` ポリシー、`updated_at`）。`v5_months` は `(user_id, month)` が主キー。`v5_loan_balances.loan_id` と `v5_moves.plan_id` は `on delete cascade`。`account_entries` の大費目の check 制約を、`'bonus'` を足したものに作り直す（制約名は `pg_constraint` から引く `do $$ … $$`）。
+- [x] **Step 4: 型と読み込みを足す** — `backend.ts` に `V5Table = "v5_plans"|"v5_loans"|"v5_loan_balances"|"v5_moves"|"v5_months"` を足し、`V4_TABLES` と同じく「なければ空」で読む。`upsertKeyed` に `v5_months` を足す。`store.ts` の変換で `data.v5` を作る。
+- [x] **Step 5: テストを流して通るのを見る** — `npx vitest run src/data/v5load.test.ts` → PASS
 - [ ] **Step 6: 全体の確認** — `npm run typecheck && npm test && npm run build` → すべて通る
 - [ ] **Step 7: コミットして push**
 
@@ -129,16 +129,16 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
   - `budgetView(d: Data, ym: string, today: string): { budget: number; left: Part; cats: CatLeft[]; fixed: { budget: number; used: number } }`（`left` の key は `budgetLeft`。子：`budget`・`used`・`planned`・`fixedOver`。`CatLeft { cat; budget; used; planned; left; over: boolean; rows: PartRow[] }`。予備は v4 と同じく「予算 − 費目別の予算の合計」で、使いすぎを予備で埋めない）
 - Consumes: v4 の `spendOf`・`budgetsFor`（`compute.ts`）はそのまま使ってよい。
 
-- [ ] **Step 1: 失敗するテストを書く** — `budget5.test.ts`：
+- [x] **Step 1: 失敗するテストを書く** — `budget5.test.ts`：
   - `budgetView` 予算 17万・食費予算 3万で、食費のカード明細 3.5万（確定）を入れると、食費の `left` が −5千・`over` が true、予備の `left` は変わらない、全体の `left.amount` は 13.5万。
   - `merged_into` がある明細と、消した（読み込みで外した）明細は数えない。
   - 固定費の費目の予算 8万に対して家賃の明細が 8.5万なら、`fixedOver` が 5千で、全体の `left` が 5千減る。
   - `guideOf`：その月に給与の入金（予定）25万・固定費の予算 8万なら `amount` 17万。給与の入金がない月は `salaryEstimate`（例 24万）を使う。
   - `monthBudget`：`v5.months` に `{ month, budget: 15万, source: "decided" }` があれば 15万、なければ目安額。
-- [ ] **Step 2: テストを流して失敗を見る** — `npx vitest run src/engine/budget5.test.ts` → FAIL
-- [ ] **Step 3: `breakdown.ts`・`budget5.ts` を書く** — 署名は上のとおり。
-- [ ] **Step 4: テストを流して通るのを見る** → PASS
-- [ ] **Step 5: `Parts.tsx` を書く** — `<PartSheet part={Part} />`：上に式（`label ¥amount ＝ 子 ± 子 …`）、子をタップするとその子の式、`rows` があれば明細の一覧（タップで v4 の明細の板を開く）。どの数字もこの板で開く。
+- [x] **Step 2: テストを流して失敗を見る** — `npx vitest run src/engine/budget5.test.ts` → FAIL
+- [x] **Step 3: `breakdown.ts`・`budget5.ts` を書く** — 署名は上のとおり。
+- [x] **Step 4: テストを流して通るのを見る** → PASS
+- [x] **Step 5: `Parts.tsx` を書く** — `<PartSheet part={Part} />`：上に式（`label ¥amount ＝ 子 ± 子 …`）、子をタップするとその子の式、`rows` があれば明細の一覧（タップで v4 の明細の板を開く）。どの数字もこの板で開く。
 - [ ] **Step 6: `Home5.tsx` を書き、ホームのタブを差し替える** — 上から：予算残額（大）、費目別残額、最近の明細（取り込み元が `card_flash`・`card_statement` なら印）、余裕額（段階4まで「―」）、使ったものを入れる（v4 の入力をそのまま使う）。
 - [ ] **Step 7: 全体の確認とプレビュー** — `npm run typecheck && npm test && npm run build` → 通る。`npm run dev` のお試しモードで、ホームが出て、予算残額の内訳が開くのを見る。
 - [ ] **Step 8: コミットして push**
@@ -169,16 +169,16 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
   - `loansAt(d: Data, t: string): Part`（key `loans`。返す先ごとの `loanAt` の合計）
 - Consumes: `Part`・`PartRow`（段階2）。
 
-- [ ] **Step 1: 失敗するテストを書く** — `loan.test.ts`（作り物の数字）：
+- [x] **Step 1: 失敗するテストを書く** — `loan.test.ts`（作り物の数字）：
   - 記録 10/1 に 20万、毎月の返済 1万（セゾン、翌月4日払い）。`loanAt(…, "2026-12-31")` は 18万（11/4・12/4 の2回）。
   - 11/20 の家賃 8万をリボに回す（セゾンのクレカ明細・大費目 `purchase`）と、`loanAt(…, "2026-11-30")` は 27万。
   - 期日 12/27 にまとめて返す返済の計画があれば、`loanPayments` の 12/27 に残り全部の行があり、`loanAt(…, "2026-12-31")` は 0。
   - 同じ日 11/10 に 26万（`at` 10:00）と 25.5万（`at` 11:00）を記録すると、11/10 の残高は 25.5万、`loanCorrections` は記録ごとに1行ずつ出る。
   - 12/4 が土曜なら返済の行は 12/7（翌営業日）。
-- [ ] **Step 2: テストを流して失敗を見る** → FAIL
-- [ ] **Step 3: `loan.ts` を書き、`guideOf` の `loanMonthly` にその月の返済の行の合計を入れる**
-- [ ] **Step 4: テストを流して通るのを見る** → PASS（`budget5.test.ts` も通ったまま）
-- [ ] **Step 5: `Plans5.tsx` の借入の欄と store の actions を書く** — 借入の一覧（返す先・借入残高（タップで内訳）・毎月の返済額）、足す・直す・消す、残高を直す（今日の日付で `v5_loan_balances` に1行）。計画のタブは、上に v5 の借入、下に v4 の計画（比べるため）。
+- [x] **Step 2: テストを流して失敗を見る** → FAIL
+- [x] **Step 3: `loan.ts` を書き、`guideOf` の `loanMonthly` にその月の返済の行の合計を入れる**
+- [x] **Step 4: テストを流して通るのを見る** → PASS（`budget5.test.ts` も通ったまま）
+- [x] **Step 5: `Plans5.tsx` の借入の欄と store の actions を書く** — 借入の一覧（返す先・借入残高（タップで内訳）・毎月の返済額）、足す・直す・消す、残高を直す（今日の日付で `v5_loan_balances` に1行）。計画のタブは、上に v5 の借入、下に v4 の計画（比べるため）。
 - [ ] **Step 6: 全体の確認** → 通る
 - [ ] **Step 7: コミットして push**
 
@@ -210,17 +210,17 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
   - `slackValue(d, t, today): number` ＝ `total(slackAt(…).parts)`
 - Consumes: `billsFor`（`compute.ts`）、`budgetView`（段階2）、`loansAt`（段階3）。
 
-- [ ] **Step 1: 失敗するテストを書く** — `slack.test.ts` に設計書 §2.4 のデータを作る（給与 25万・家賃 8万（セゾン）・予算 17万（三井）・11/1 の口座 30万、10月の三井 17万と10月の家賃 8万が未払い）。
+- [x] **Step 1: 失敗するテストを書く** — `slack.test.ts` に設計書 §2.4 のデータを作る（給与 25万・家賃 8万（セゾン）・予算 17万（三井）・11/1 の口座 30万、10月の三井 17万と10月の家賃 8万が未払い）。
   - `slackValue(d, "2026-11-01", "2026-11-01")` が 5万。
   - 11/4・11/15・11/26 の各日を `today` にして（その日までの明細を確定にして）5万のまま。
   - 11/20 に家賃をリボに回したデータで、11/20 も 5万のまま（④が +8万、①が −8万）。
   - 12/4 が土曜の年のデータでは、12/5 でもセゾンの請求が①に残り、12/7 の翌日に外れる（Review Focus 2）。
   - まとめられた（`merged_into`）クレカ明細は①に入らない（Review Focus 3）。
   - 立替の返金の予定 3千があれば `refund` が 3千。
-- [ ] **Step 2: テストを流して失敗を見る** → FAIL
-- [ ] **Step 3: `slack.ts` を書く**
-- [ ] **Step 4: テストを流して通るのを見る** → PASS
-- [ ] **Step 5: ホームに余裕額を出す** — 小さく1行、タップで `PartSheet`。マイナスなら赤。
+- [x] **Step 2: テストを流して失敗を見る** → FAIL
+- [x] **Step 3: `slack.ts` を書く**
+- [x] **Step 4: テストを流して通るのを見る** → PASS
+- [x] **Step 5: ホームに余裕額を出す** — 小さく1行、タップで `PartSheet`。マイナスなら赤。
 - [ ] **Step 6: 全体の確認** → 通る
 - [ ] **Step 7: コミットして push**
 
@@ -252,16 +252,16 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
   - `planMonthlyOf(d: Data, ym: string): number`（その月の購入・貯蓄の毎月の積立額の合計。目標額に届いた計画は0）
 - Consumes: `Part`（段階2）、`slackAt`（段階4）。
 
-- [ ] **Step 1: 失敗するテストを書く** — `reserve.test.ts`：
+- [x] **Step 1: 失敗するテストを書く** — `reserve.test.ts`：
   - 貯蓄 目標 30万・毎月 5万・11月から：`savedAt(…, "2026-12-15")` は 10万。2027-05 には 30万で止まり、`planMonthlyOf(…, "2027-05")` は 0。
   - 余裕額から 2万入れると（`manual`）、`slackValue` が 2万減る。
   - 賞与 30万（予定・12/10）に 25万の配分：`savedAt(…, "2026-12-11", false)` は配分を数えない、賞与を確定にすると数える。賞与の額を 28万に直しても配分は 25万のまま。
   - `drawPlan(d, 3万)`：取崩順 [A(積立 2万), B(取崩不可), C(積立 5万)] なら A 2万・C 1万。
   - 購入 目標 6万・積立 6万に、6.5万のクレカ明細をひも付ける（`spend`）：その明細は `budgetView` の使った額に入らず、余裕額は 5千減る。
-- [ ] **Step 2: テストを流して失敗を見る** → FAIL
-- [ ] **Step 3: `reserve.ts` を書き、`slackAt` の `reserve` と `guideOf` の `planMonthly` をつなぐ。`spend` でひも付けた明細は `budgetView` で数えない**
-- [ ] **Step 4: テストを流して通るのを見る** → PASS（前の段階のテストも通ったまま）
-- [ ] **Step 5: `Plans5.tsx` に計画の一覧と中身を書く** — 一覧：計画・種類・目標額・期日・積立額・そろうか（購入・貯蓄）。返済の計画は期日と返す借入だけ（3つの表示は段階6）。中身：毎月の積立額・余裕額から入れる・賞与からの配分（予定の賞与を選ぶ）・取り崩し・取崩順（上下で並べ替え）・取崩不可。
+- [x] **Step 2: テストを流して失敗を見る** → FAIL
+- [x] **Step 3: `reserve.ts` を書き、`slackAt` の `reserve` と `guideOf` の `planMonthly` をつなぐ。`spend` でひも付けた明細は `budgetView` で数えない**
+- [x] **Step 4: テストを流して通るのを見る** → PASS（前の段階のテストも通ったまま）
+- [x] **Step 5: `Plans5.tsx` に計画の一覧と中身を書く** — 一覧：計画・種類・目標額・期日・積立額・そろうか（購入・貯蓄）。返済の計画は期日と返す借入だけ（3つの表示は段階6）。中身：毎月の積立額・余裕額から入れる・賞与からの配分（予定の賞与を選ぶ）・取り崩し・取崩順（上下で並べ替え）・取崩不可。
 - [ ] **Step 6: 全体の確認** → 通る
 - [ ] **Step 7: コミットして push**
 
@@ -293,15 +293,15 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
   - `lowest(d, today, to): { date: string; bank: number }`（段階7で使う）
 - Consumes: `slackAt`（段階4）、`loanPayments`・`loansAt`（段階3）、`reserveAt`（段階5）。
 
-- [ ] **Step 1: 失敗するテストを書く** — `outlook.test.ts`：
+- [x] **Step 1: 失敗するテストを書く** — `outlook.test.ts`：
   - §2.4 のデータで `today = "2026-11-01"`：`outlook` の 11/4・11/15・11/20・11/26・12/4・12/10・12/15・12/26・12/27 が表の口座残高と余裕額（12/10 からは 35万）になる。
   - 月末 11/30 → 12/1 で余裕額が変わらない（予算どおりに使う前提。Review Focus 1）。
   - 先の月で給与の予定がない月は `salaryEstimate` で数える（Review Focus 4）。
   - `repayView`：期日 12/27・借入 8万 → `due` 8万、`bankThen` 68万、`ok` true、`slackAfter` 35万。
-- [ ] **Step 2: テストを流して失敗を見る** → FAIL
-- [ ] **Step 3: `outlook.ts` を書き、`slackAt` を `t > today` に広げる**
-- [ ] **Step 4: テストを流して通るのを見る** → PASS（前のテストも通ったまま）
-- [ ] **Step 5: `Outlook5.tsx` を書き、見通しのタブを差し替える** — v4 の `Flow.tsx` のグラフ（なぞるとその日の額）と期間の切り替えを引き継ぎ、線を口座残高と余裕額にする。返済の計画の3つの表示を `Plans5.tsx` に足す。
+- [x] **Step 2: テストを流して失敗を見る** → FAIL
+- [x] **Step 3: `outlook.ts` を書き、`slackAt` を `t > today` に広げる**
+- [x] **Step 4: テストを流して通るのを見る** → PASS（前のテストも通ったまま）
+- [x] **Step 5: `Outlook5.tsx` を書き、見通しのタブを差し替える** — v4 の `Flow.tsx` のグラフ（なぞるとその日の額）と期間の切り替えを引き継ぎ、線を口座残高と余裕額にする。返済の計画の3つの表示を `Plans5.tsx` に足す。
 - [ ] **Step 6: 全体の確認** → 通る
 - [ ] **Step 7: コミットして push**
 
@@ -332,15 +332,15 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
   - `compare(d: Data, c: Change, today: string): { slack: [number, number]; budget: { month: string; before: number; after: number }; lowest: { date: string; bank: number }; shortBudget: number; draw: { plan: V5Plan; amount: number }[] | null; warnOnly: boolean }`（`shortBudget` はその月の予算残額のマイナスの分。`draw` は「前が 0 以上で後がマイナス」のときだけ、マイナスの分について `drawPlan`。前からマイナスなら `draw: null`・`warnOnly: true`）
 - Consumes: `slackValue`（段階4・6）、`budgetView`（段階2）、`drawPlan`（段階5）、`lowest`（段階6）。
 
-- [ ] **Step 1: 失敗するテストを書く** — `whatif.test.ts`：
+- [x] **Step 1: 失敗するテストを書く** — `whatif.test.ts`：
   - 来月の予備に 3万の予定（来月の予算残額 2万）→ `shortBudget` 1万。`decideBudget(来月, 予算 + 1万)` の `compare` で今日の余裕額が 1万減る。
   - 余裕額 5千のとき 1万足す → `draw` が取崩順の計画から 5千、`warnOnly` false。
   - 余裕額 −20万のとき 1万足す → `draw` null、`warnOnly` true。
   - `applyChange` は元の `d` を変えない。
-- [ ] **Step 2: テストを流して失敗を見る** → FAIL
-- [ ] **Step 3: `whatif.ts` と ⑤ を書く**
-- [ ] **Step 4: テストを流して通るのを見る** → PASS
-- [ ] **Step 5: `Preview.tsx` を書き、予定の入力・予算に足す・計画に入れるの各操作の前に出す。ホームに「確保額から差し引く」**
+- [x] **Step 2: テストを流して失敗を見る** → FAIL
+- [x] **Step 3: `whatif.ts` と ⑤ を書く**
+- [x] **Step 4: テストを流して通るのを見る** → PASS
+- [x] **Step 5: `Preview.tsx` を書き、予定の入力・予算に足す・計画に入れるの各操作の前に出す。ホームに「確保額から差し引く」**
 - [ ] **Step 6: 全体の確認** → 通る
 - [ ] **Step 7: コミットして push**
 
@@ -363,11 +363,11 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
 - Modify: `src/ui/Ledger.tsx`、`src/ui/Sheets.tsx`、`src/data/store.ts`（`toRevolving(cardId, on: boolean)`：`on` なら大費目を `purchase` にする。戻すときの大費目は費目から `groupOfCat` で決める。`splitAccount(id, parts: {category; amount}[])`：1行を費目ごとの行に分ける）
 - Test: `src/data/store5.test.ts`（`splitAccount` の合計が元の額と同じでなければ失敗、`toRevolving` で戻すと元の大費目）
 
-- [ ] **Step 1: 失敗するテストを書く** — 上の2つ。
-- [ ] **Step 2: テストを流して失敗を見る** → FAIL
-- [ ] **Step 3: store の2つの関数を書く**
-- [ ] **Step 4: テストを流して通るのを見る** → PASS
-- [ ] **Step 5: `Ledger.tsx`・`Sheets.tsx` を直す**
+- [x] **Step 1: 失敗するテストを書く** — 上の2つ。
+- [x] **Step 2: テストを流して失敗を見る** → FAIL
+- [x] **Step 3: store の2つの関数を書く**
+- [x] **Step 4: テストを流して通るのを見る** → PASS
+- [x] **Step 5: `Ledger.tsx`・`Sheets.tsx` を直す**
 - [ ] **Step 6: 全体の確認** → 通る
 - [ ] **Step 7: コミットして push**
 
@@ -389,11 +389,11 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
 - Modify: `src/ui/Settings.tsx`、`src/data/store.ts`（開いたときに今月の `v5_months` がなければ `guide` で保存）、`src/engine/budget5.ts`（`monthBudget` の `source` に `guide` 保存済みを反映）
 - Test: `src/engine/budget5.test.ts` に「`guide` で保存した月は、あとで給与の見込みを変えても予算が動かない」を足す
 
-- [ ] **Step 1: 失敗するテストを足す** → FAIL
-- [ ] **Step 2: 実装して通す** → PASS
-- [ ] **Step 3: 設定の画面を直す**
-- [ ] **Step 4: 全体の確認** → 通る
-- [ ] **Step 5: コミットして push**
+- [x] **Step 1: 失敗するテストを足す** → FAIL
+- [x] **Step 2: 実装して通す** → PASS
+- [x] **Step 3: 設定の画面を直す**
+- [x] **Step 4: 全体の確認** → 通る
+- [x] **Step 5: コミットして push**
 
 ---
 
@@ -414,11 +414,11 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
 **Interfaces:**
 - Consumes: `slackAt`・`budgetView`・`reserveAt`・`loansAt`・`outlook`・`repayView`・`compare`（`applyChange` で ops 全体を当てる）。
 
-- [ ] **Step 1: 失敗するテストを書く** — `ops.test.ts`：v2 の ops で `v5_moves` を足す・`v5_months` を決める・クレカ明細を `purchase` にする が受け付けられる。v1 の `format` は拒む。書けない列があればファイル全体を拒む（v4 と同じ）。
-- [ ] **Step 2: テストを流して失敗を見る** → FAIL
-- [ ] **Step 3: 実装して通す** → PASS
-- [ ] **Step 4: `docs/OPS.md` を v2 に書き直す（例は作り物）**
-- [ ] **Step 5: 全体の確認** → 通る
+- [x] **Step 1: 失敗するテストを書く** — `ops.test.ts`：v2 の ops で `v5_moves` を足す・`v5_months` を決める・クレカ明細を `purchase` にする が受け付けられる。v1 の `format` は拒む。書けない列があればファイル全体を拒む（v4 と同じ）。
+- [x] **Step 2: テストを流して失敗を見る** → FAIL
+- [x] **Step 3: 実装して通す** → PASS
+- [x] **Step 4: `docs/OPS.md` を v2 に書き直す（例は作り物）**
+- [x] **Step 5: 全体の確認** → 通る
 - [ ] **Step 6: コミットして push**
 
 ---
@@ -441,9 +441,9 @@ v4 の `compute.ts`・`plans.ts` と v4 の画面は、段階11で使ってい�
 - Modify: `docs/SPEC.md`（v5 として書き直す。設計書の中身を仕様の形にする）、`README.md`、`CLAUDE.md`（「仕様は docs/SPEC.md」のまま。v5 の表を書き足す）
 - Test: `src/data/store5.test.ts` に引き継ぎのテスト（予定の行は消す・確定の行はつながりだけ外す）
 
-- [ ] **Step 1: 引き継ぎの失敗するテストを書く** → FAIL
-- [ ] **Step 2: 引き継ぎを実装して通す** → PASS
-- [ ] **Step 3: v4 の画面と使っていない計算を消し、`npm run typecheck && npm test && npm run build` が通るまで直す**
-- [ ] **Step 4: `docs/SPEC.md`・`README.md`・`CLAUDE.md` を書き直す**
-- [ ] **Step 5: 全体の確認** → 通る。画面の文字に v4 の言葉が残っていないか `grep -rn "実質残高\|たまる額\|使う額\|確保額の内訳" src/ui` で確かめる
+- [x] **Step 1: 引き継ぎの失敗するテストを書く** → FAIL
+- [x] **Step 2: 引き継ぎを実装して通す** → PASS
+- [x] **Step 3: v4 の画面と使っていない計算を消し、`npm run typecheck && npm test && npm run build` が通るまで直す**
+- [x] **Step 4: `docs/SPEC.md`・`README.md`・`CLAUDE.md` を書き直す**
+- [x] **Step 5: 全体の確認** → 通る。画面の文字に v4 の言葉が残っていないか `grep -rn "実質残高\|たまる額\|使う額\|確保額の内訳" src/ui` で確かめる
 - [ ] **Step 6: コミットして push。本人の確認のあと、PR を作って main に入れる（PR は本人が頼んだときだけ）**
