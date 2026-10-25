@@ -46,7 +46,7 @@ function LoanSheet({ store, data, today, loan, planId, onClose }: { store: Store
   );
 }
 
-const blank = (kind: PlanKind, today: string): Omit<V5Plan, "id"> => ({ kind, name: "", target: 0, due_date: kind === "repay" ? `${addMonths(ymOf(today), 2)}-27` : null, monthly: 0, start_month: ymOf(today), draw_order: 0, no_draw: kind === "repay", done: false, sort: 0 });
+const blank = (kind: PlanKind, today: string): Omit<V5Plan, "id"> => ({ kind, name: "", target: 0, due_date: kind === "repay" ? `${addMonths(ymOf(today), 2)}-27` : null, monthly: 0, start_month: addMonths(ymOf(today), 1), draw_order: 0, no_draw: kind === "repay", done: false, sort: 0 });
 
 function PlanSheet({ store, data, today, plan, repay, onClose }: { store: Store; data: AppData; today: string; plan?: V5Plan; repay: boolean; onClose: () => void }) {
   const base = plan ?? blank(repay ? "repay" : "save", today);
@@ -54,7 +54,7 @@ function PlanSheet({ store, data, today, plan, repay, onClose }: { store: Store;
   const [target, setTarget] = useState<number | "">(base.target || "");
   const [due, setDue] = useState(base.due_date ?? "");
   const [monthly, setMonthly] = useState<number | "">(base.monthly || "");
-  const [start, setStart] = useState(base.start_month ?? ymOf(today));
+  const [start, setStart] = useState(base.start_month ?? addMonths(ymOf(today), 1));
   const [move, setMove] = useState<"" | "manual" | "bonus" | "draw">("");
   const [amount, setAmount] = useState<number | "">("");
   const bonuses = data.accounts.filter((e) => e.direction === "in" && e.group === "bonus" && e.date >= addMonths(ymOf(today), -1));

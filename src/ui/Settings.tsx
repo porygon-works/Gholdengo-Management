@@ -3,7 +3,7 @@ import {
   ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, computeMonth, GROUP_LABEL_DEFAULTS, groupOfCat, IN_GROUPS, monthBudget, RESERVE, todayJST,
   type AccountGroup, type CardDef, type CardGroup, type Recurring, type Settings as S,
 } from "../engine";
-import { actions, actions5, type AppData, type ImportFile, type Store } from "../data/store";
+import { actions, actions5, type AppData, type Store } from "../data/store";
 import { ConfirmChange } from "./Preview";
 import { backend, resetLocal } from "../data/backend";
 import { VERSION_LABEL } from "./version";
@@ -274,7 +274,7 @@ function Rules({ store, data }: { store: Store; data: AppData }) {
   };
   return (
     <section>
-      <h2>店名ルール <small>{data.rules.length}件</small></h2>
+      <h2>お店のルール <small>{data.rules.length}件</small></h2>
       <div className="panel">
         <div className="grid2">
           <Field label="店名に含む語"><input value={pattern} onChange={(e) => setPattern(e.target.value)} /></Field>
@@ -284,7 +284,7 @@ function Rules({ store, data }: { store: Store; data: AppData }) {
         <Field label="検索"><input value={q} onChange={(e) => setQ(e.target.value)} /></Field>
         <table className="tbl"><tbody>
           {rules.map((r) => (
-            <tr key={r.id}><td>{r.pattern}</td><td>{r.category}</td><td><button className="btn sm danger" onClick={async () => { if (await store.run(() => actions.deleteRule(r.id))) toast("消しました"); }}>消す</button></td></tr>
+            <tr key={r.id}><td>{r.pattern}</td><td>{r.category}</td><td><button className="btn sm danger" onClick={async () => { if (await store.run(() => actions.deleteRule(r.id))) toast("削除しました"); }}>削除</button></td></tr>
           ))}
         </tbody></table>
       </div>
@@ -296,13 +296,12 @@ function Rules({ store, data }: { store: Store; data: AppData }) {
 
 function Assets({ store, data }: { store: Store; data: AppData }) {
   const [s, setS] = useState<S>(data.settings);
-  const n = (k: "safety" | "payday" | "salaryEstimate") => <NumInput plain={k === "payday"} value={s[k]} onChange={(v) => setS({ ...s, [k]: v === "" ? 0 : v })} />;
+  const n = (k: "payday" | "salaryEstimate") => <NumInput plain={k === "payday"} value={s[k]} onChange={(v) => setS({ ...s, [k]: v === "" ? 0 : v })} />;
   const save = async () => { if (await store.run(() => actions.saveSettings(s))) toast("保存しました"); };
   return (
     <section>
-      <h2>口座・カード</h2>
+      <h2>口座とカード</h2>
       <div className="panel">
-        <Field label="安全残高" hint="給料日の前日に残る額がこれより少ないと赤くします">{n("safety")}</Field>
         <div className="grid2">
           <Field label="給料日">{n("payday")}</Field>
           <Field label="給与の見込額" hint="給与の予定がない先の月に使う">{n("salaryEstimate")}</Field>
@@ -335,7 +334,7 @@ const GROUP_WHERE: Record<(typeof GROUP_KEYS)[number], string> = {
   purchase: "クレカ明細", card: "口座明細の出金（クレカの請求）", other: "口座明細の入金・出金", salary: "口座明細の入金", extra: "口座明細の入金", refund: "口座明細の入金", bonus: "口座明細の入金",
 };
 
-/** 区分：費目（名前・大費目・1日に使える額・追加・削除）と大費目の名前 */
+/** 区分：費目（名前・大費目・追加・削除）と大費目の名前 */
 function Kinds({ store, data }: { store: Store; data: AppData }) {
   const s = data.settings;
   const cats = [...s.varCats, ...s.fixCats];
@@ -369,8 +368,7 @@ function Kinds({ store, data }: { store: Store; data: AppData }) {
     if (cats.includes(c) || c === RESERVE) { toast("同じ名前の費目があります"); return; }
     saveS(newGroup === "variable" ? { varCats: [...s.varCats, c] } : { fixCats: [...s.fixCats, c] }, `「${c}」を足しました`).then(() => setNewName(""));
   };
-  const toggleDaily = (c: string) => saveS({ dailyCats: s.dailyCats.includes(c) ? s.dailyCats.filter((x) => x !== c) : [...s.dailyCats, c] }, "保存しました");
-  const saveLabels = () => {
+    const saveLabels = () => {
     const changed = Object.fromEntries(Object.entries(labels).filter(([k, v]) => v.trim() && v !== GROUP_LABEL_DEFAULTS[k]).map(([k, v]) => [k, v.trim()]));
     saveS({ labels: changed }, "大費目の名前を保存しました");
   };
@@ -380,7 +378,6 @@ function Kinds({ store, data }: { store: Store; data: AppData }) {
       <input value={names[c] ?? c} onChange={(e) => setNames({ ...names, [c]: e.target.value })} onBlur={() => rename(c)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} aria-label={`${c}の名前`} />
       <div className="kindctl">
         <Select value={g} options={["variable", "fixed"] as const} labels={{ variable: labels.variable, fixed: labels.fixed }} onChange={(v) => setGroup(c, v)} />
-        <label className="check"><input type="checkbox" checked={s.dailyCats.includes(c)} onChange={() => toggleDaily(c)} />1日に使える額</label>
         <span className="note">明細 {used(c)}件</span>
         <button className="btn sm danger" onClick={() => remove(c)}>削除</button>
       </div>
@@ -437,7 +434,7 @@ function OpsImport({ store, data }: { store: Store; data: AppData }) {
     <section>
       <h2>Claude 相談の取込 <small>{OPS_FORMAT}（docs/OPS.md）</small></h2>
       <div className="panel">
-        <Field label="ファイル"><input type="file" accept="application/json,.json" onChange={async (e) => { const f = e.target.files?.[0]; if (f) read(await f.text()); }} /></Field>
+        <Field label="ファイル"><FilePick onFile={async (f) => read(await f.text())} /></Field>
         <Field label="貼り付け"><textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={`{"format": "${OPS_FORMAT}", "ops": [...]}`} /></Field>
         <div className="btns"><button className="btn ghost" onClick={() => text.trim() && read(text)}>読込</button></div>
         {plan && (
@@ -466,15 +463,6 @@ function OpsImport({ store, data }: { store: Store; data: AppData }) {
 }
 
 function DataTab({ store, data }: { store: Store; data: AppData }) {
-  const [msg, setMsg] = useState("");
-  const importFile = async (f: File | undefined) => {
-    if (!f) return;
-    let json: ImportFile;
-    try { json = JSON.parse(await f.text()); } catch { toast("JSON として読めませんでした"); return; }
-    if (!confirm(`「${f.name}」を取り込みますか？`)) return;
-    let result = "";
-    if (await store.run(async () => { result = await actions.importJson(data, json); })) { setMsg(result); toast("取り込みました"); }
-  };
   const download = () => {
     const blob = new Blob([JSON.stringify(snapshot(data, todayJST()), null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -491,17 +479,24 @@ function DataTab({ store, data }: { store: Store; data: AppData }) {
       <div className="panel">
         <div className="note">アプリの版：{VERSION_LABEL}</div>
         <div className="note">保存先：{backend.mode === "supabase" ? "Supabase（ログインした本人だけが読み書きできます）" : "この端末のブラウザの中（お試しモード）"}</div>
-        <div className="note">クレカ明細 {data.cards.length}件・口座明細 {data.accounts.length}件・残高の記録 {data.balances.length}件・定期 {data.recurring.length}件・計画 {data.plans.length}件</div>
+        <div className="note">クレカ明細 {data.cards.length}件・口座明細 {data.accounts.length}件・残高の記録 {data.balances.length}件・定期 {data.recurring.length}件・返済計画 {data.v5.plans.filter((p) => p.kind === "repay").length}件・貯蓄計画 {data.v5.plans.filter((p) => p.kind !== "repay").length}件</div>
         <div className="btns"><button className="btn ghost" onClick={download}>書き出し（JSON）</button></div>
-        <Field label="移行用 JSON の取込" hint="移行用に作ったファイル（format: gholdengo-import-v1）。2回取り込んでも二重にはなりません">
-          <input type="file" accept="application/json,.json" onChange={(e) => importFile(e.target.files?.[0])} />
-        </Field>
-        {msg && <div className="alert ok">{msg}</div>}
         {backend.mode === "local" && (
           <div className="btns"><button className="btn danger" onClick={() => { if (confirm("お試しモードのデータをすべて消しますか？")) { resetLocal(); location.reload(); } }}>お試しのデータを消す</button></div>
         )}
       </div>
     </section>
     </>
+  );
+}
+
+/** ファイルを選ぶボタン（ブラウザの英語の部品を出さない） */
+function FilePick({ onFile }: { onFile: (f: File) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <label className="btn ghost filepick">
+      {name || "ファイル選択"}
+      <input type="file" accept="application/json,.json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { setName(f.name); onFile(f); } e.target.value = ""; }} />
+    </label>
   );
 }

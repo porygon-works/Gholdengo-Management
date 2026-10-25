@@ -280,3 +280,5 @@ button.row:disabled { color: inherit; opacity: 1; }
 button.row:not(:disabled):hover, .row[role=button]:hover, button.crow:hover { background: var(--sunk); }
 button.row:not(:disabled):active, .row[role=button]:active, button.crow:active, button.pcard:active, .pcard[role=button]:active, .tile:active, .stat3 > button:active, .formula .fl:not(:disabled):active { background: color-mix(in srgb, var(--gold) 16%, var(--surface)); }
 .formula .fl:not(:disabled) { cursor: pointer; }
+.stat3 > button { align-content: space-between; }
+.filepick { display: inline-block; justify-self: start; }
