@@ -1,12 +1,13 @@
 # Gholdengo 家計簿
 
 前の家計簿アーティファクトを置き換える、家計簿の Web アプリ（PWA）。
-給与から固定費と計画の分（リボの支払い・積立）を引いた目安から「今月の予算」を決め、口座明細とクレカ明細でお金の動きを管理する。口座の見通し（線グラフ）と、返済・買い物・貯蓄の計画で、口座に残しておくお金（確保額）を見える形にする。三井住友カードの通知メールは GAS で自動で取り込む。
+「予算残額」（今月あといくら使えるか）と「余裕額」（使い道の決まっていないお金がいくらあるか）の2つを主役にした家計簿（v5）。給与から固定費・借入の毎月の返済・貯蓄の積立を引いた目安額から月の予算を決め、口座明細とクレカ明細でお金の動きを管理する。見通し（線グラフ）と、返済計画・貯蓄計画で先の動きを見る。どの数字もタップで内訳がたどれる。三井住友カードの通知メールは GAS で自動で取り込む。
 
-- 仕様：[docs/SPEC.md](docs/SPEC.md)
+- 仕様：[docs/SPEC.md](docs/SPEC.md)（設計の理由：[docs/superpowers/specs/2026-10-23-v5-yoyuugaku-design.md](docs/superpowers/specs/2026-10-23-v5-yoyuugaku-design.md)）
+- Claude との相談の取り込み：[docs/OPS.md](docs/OPS.md)
 - 計算エンジン：`src/engine/`（画面と分けた関数。`npm test` でテスト）
 - 画面：`src/ui/`
-- DB：`supabase/migrations/`（v3 の表は `0004_v3_tables.sql`：口座明細 `account_entries`・クレカ明細 `card_entries`。v4 の計画と月の予算は `0007_plans_months.sql`：`plans`・`plan_debts`・`plan_funds`・`months`）
+- DB：`supabase/migrations/`（v3 の表は `0004_v3_tables.sql`：口座明細 `account_entries`・クレカ明細 `card_entries`。v5 の計画・借入・月の予算は `0008_v5.sql`：`v5_plans`・`v5_loans`・`v5_loan_balances`・`v5_moves`・`v5_months`）
 - メールの取り込み：`gas/Code.gs`
 
 ```
@@ -20,7 +21,7 @@ Gmail ──(15分ごと)── GAS ──→ Supabase ←──→ Webアプリ
 Supabase はプロジェクト **porygon-works** に複数のアプリの DB をまとめている。新しいプロジェクトは作らず、この家計簿の表は **`ggmg` スキーマ** に置く。
 
 1. <https://supabase.com> で **porygon-works** プロジェクトを開く。
-2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` → `0005_deleted_every.sql` → `0006_snapshots.sql` → `0007_plans_months.sql`）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
+2. 左の **SQL Editor** を開き、`supabase/migrations/` のファイルを番号の順に（`0001_init.sql` → `0002_recurring_shop.sql` → `0003_cards.sql` → `0004_v3_tables.sql` → `0005_deleted_every.sql` → `0006_snapshots.sql` → `0007_plans_months.sql` → `0008_v5.sql`）全部貼って **Run**（`ggmg` スキーマと表ができる。何度実行しても壊れない）。
 3. **Project Settings → Data API → Exposed schemas** に **`ggmg`** を足して **Save**（これをしないとアプリと GAS から表が見えない）。
 4. **Authentication → Users → Add user → Create new user** で、自分のメールとパスワードを入れて作る（Auto Confirm User にチェック。ほかのアプリで作ったユーザーがあればそれを使ってよい）。
 5. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ** にする（自分以外がユーザーを作れないように。ほかのアプリで新規登録を使っているなら、そちらに合わせる）。
@@ -77,6 +78,13 @@ Supabase はプロジェクト **porygon-works** に複数のアプリの DB を
 3. **計画** の画面で、残高（カードのサイトで見た額）・毎月の支払い・まとめて返す日・賞与から入れる額を確かめて直す。
 4. 設定 → **予算** で、その月の予算を決める（空なら目安のまま）。
 
+## v4 から v5 にするとき（1回だけ）
+
+1. Supabase の SQL Editor で `supabase/migrations/0008_v5.sql` を貼って **Run**（v5 の計画・借入・月の予算の表と、クレカ明細の `revolved_at` ができる。何度実行しても壊れない）。
+2. **計画** の画面で、返済計画（返済先と借入残高）と貯蓄計画を入れる。Claude と相談して作った `gholdengo-ops-v2` の JSON を、設定 → データから取り込んでもよい。
+3. 設定 → **データ** の「v4 から引き継ぎ」で一覧を確かめて **引き継ぎ実行**（v4 の計画の予定の行と、前の版の「給与の調整」「追加予算の調整」の行を消し、v4 の計画の確定した行は普通の明細として残す）。
+4. 設定 → **予算** で、その月の予算を確かめる（決めていなければ月の初めの目安額になる）。
+
 ## Claude が読めるようにする（Google ドライブ）
 
 形式は [docs/OPS.md](docs/OPS.md)。
@@ -85,7 +93,7 @@ Supabase はプロジェクト **porygon-works** に複数のアプリの DB を
 2. GAS の `コード.gs` を新しい `gas/Code.gs` に貼り替えて保存。
 3. 関数 **setup** を選んで **実行**。Google ドライブを使う許可を求められるので許可する（15分ごとの取り込みと、1時間ごとのドライブへの書き出しのトリガーができる）。
 4. アプリを一度開く（開くたびに書き出しを保存する）。数分後、Google ドライブに「Gholdengo/gholdengo-snapshot.json」ができる。
-5. Claude で Google ドライブをつなぐと、いつでも読める。Claude が作った変更（gholdengo-ops-v2）は、アプリの「設定 → データ → Claude との相談を取り込む」で中身を確かめてから実行する。
+5. Claude で Google ドライブをつなぐと、いつでも読める。Claude が作った変更（gholdengo-ops-v2）は、アプリの「設定 → データ → Claude 相談の取込」で中身を確かめてから実行する。
 
 ## 開発
 
