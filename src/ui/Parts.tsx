@@ -49,7 +49,7 @@ export function PartSheet({ part, onClose, onRow }: { part: Part; onClose: () =>
 export function PartNum({ part, open, className }: { part: Part; open: OpenPart; className?: string }) {
   return (
     <button className={`btn sm ghost num ${className ?? ""} ${part.amount < 0 ? "neg" : ""}`} onClick={() => open(part)} aria-label={`${part.label}の内訳`}>
-      {money(part.amount)} ›
+      {money(part.amount)}<span className="go">›</span>
     </button>
   );
 }

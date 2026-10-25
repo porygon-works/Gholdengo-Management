@@ -38,7 +38,7 @@ export function summary(d: AppData, today: string) {
       const base = { name: p.name, kind: PLAN_KIND_LABEL[p.kind], target: p.target, dueDate: p.due_date, monthly: p.monthly, drawOrder: p.draw_order, noDraw: p.no_draw, done: p.done };
       if (p.kind === "repay") {
         const r = repayView(d, p, today);
-        return { ...base, repay: r && { due: tree(r.due), bankThen: r.bankThen.amount, ok: r.ok, slackAfter: r.slackAfter.amount } };
+        return { ...base, repay: r && { due: tree(r.due), bankThen: r.bankThen.amount, ok: r.ok, lowAfter: { date: r.lowAfter.label, amount: r.lowAfter.amount } } };
       }
       return { ...base, saved: tree(savedAt(d, p, today)), plannedBonus: plannedBonus(d, p) };
     }),

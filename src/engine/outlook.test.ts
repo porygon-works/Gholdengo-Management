@@ -50,13 +50,18 @@ describe("見通し", () => {
     expect(at("2026-12-16").slack).toBe(at("2026-12-14").slack);
   });
 
-  it("返済の計画：返す額の見込み・その日の口座残高・返した後の余裕額", () => {
+  it("返済の計画：返す額の見込み・その日の口座残高・返した後の最低残高（期日から60日）", () => {
     const d = revolving();
     const r = repayView(d, d.v5.plans[0], "2026-11-01")!;
     expect(r.due.amount).toBe(80000);
     expect(r.bankThen.amount).toBe(850000);
     expect(r.ok).toBe(true);
-    expect(r.slackAfter.amount).toBe(350000);
+    // 期日〜60日後の毎日の口座残高の見込みのうち、一番少ない日と額
+    const after = outlook(d, "2026-11-01", "2026-12-27", "2027-02-25");
+    const min = after.reduce((a, x) => (x.bank < a.bank ? x : a));
+    expect(r.lowAfter.amount).toBe(min.bank);
+    expect(r.lowAfter.label).toContain(`${+min.date.slice(5, 7)}/${+min.date.slice(8)}`);
+    expect(r.lowAfter.rows!.at(-1)!.date <= min.date).toBe(true);
   });
 
   it("口座残高が一番少なくなる日", () => {

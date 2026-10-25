@@ -74,18 +74,29 @@ export function outlook(d: Data, today: string, from: string, to: string): { dat
   return out;
 }
 
-/** 返済の計画の3つ：返す額の見込み・その日の口座残高の見込み（返す前）と返せるか・返した後の余裕額 */
-export function repayView(d: Data, p: V5Plan, today: string): { due: Part; bankThen: Part; ok: boolean; slackAfter: Part } | null {
+/**
+ * 返済の計画の3つ：返す額の見込み・その日の口座残高の見込み（返す前）と返せるか・返した後の最低残高（期日から60日で口座残高が一番少なくなる日と額）。
+ * 返した後の余裕額は出さない（借入残高はもとから余裕額に入っていて、返しても動かないため。設計書 §3.3）
+ */
+export function repayView(d: Data, p: V5Plan, today: string): { due: Part; bankThen: Part; ok: boolean; lowAfter: Part } | null {
   if (p.kind !== "repay" || !p.due_date) return null;
   const date = p.due_date;
   const loans = d.v5.loans.filter((l) => l.plan_id === p.id);
   const due = sum("repayDue", "返す額の見込み", loans.map((l) => loanAt(d, l, addDays(date, -1))));
-  const rows = projectedRows(d, today, date);
+  const end = addDays(date, 60);
+  const rows = projectedRows(d, today, end);
   const lump = rows.filter((r) => r.kind === "loan" && r.date === date && r.ref.id.includes(":lump:")).reduce((a, r) => a - r.amount, 0);
   const bank = bankAhead(d, date, today, rows);
-  const bankThen = leaf("bankThen", `${+date.slice(5, 7)}/${+date.slice(8)}の口座残高の見込み（返す前）`, bank.amount + lump);
-  return { due, bankThen: { ...bankThen, rows: bank.rows }, ok: bankThen.amount >= due.amount, slackAfter: slackOn(d, date, today, rows) };
+  const bankThen = leaf("bankThen", `${md(date)}の口座残高の見込み（返す前）`, bank.amount + lump);
+  // 期日（返した後）から60日で、口座残高が一番少なくなる日
+  let low = { date, amount: bank.amount };
+  let run = bank.amount;
+  for (const r of rows) if (r.date > date) { run += r.amount; if (run < low.amount) low = { date: r.date, amount: run }; }
+  const lowAfter = { ...leaf("lowAfter", `返した後の最低残高（${md(low.date)}）`, low.amount), rows: bankAhead(d, low.date, today, rows).rows };
+  return { due, bankThen: { ...bankThen, rows: bank.rows }, ok: bankThen.amount >= due.amount, lowAfter };
 }
+
+const md = (t: string) => `${+t.slice(5, 7)}/${+t.slice(8)}`;
 
 /** 今日〜to で口座残高が一番少なくなる日と額 */
 export function lowest(d: Data, today: string, to: string): { date: string; bank: number } {

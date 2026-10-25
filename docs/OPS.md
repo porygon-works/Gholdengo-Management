@@ -20,7 +20,7 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
 | `summary.slack` | 今日の余裕額と内訳。`parts` はアプリでタップすると出る式と同じ（口座残高 ＋ 未入金給与 ＋ 未回収立替 − 支払予定額 − 確保額）。確保額は使う日のある貯蓄計画（buy）の積立額だけで、使う日のない貯蓄計画（save）は余裕額に入ったまま。説明するときはこの名前と数字を使う |
 | `summary.thisMonth`・`nextMonth` | その月の予算（`budget`・`budgetSource`：決めた額 `decided`／月の初めの目安額 `guide`／いまの目安額 `live`）・目安額の内訳（`guide`）・予算残額の内訳（`budgetLeft`）・費目ごと（`categories`） |
 | `summary.loans` | 借入ごとの借入残高の内訳（記録した残高 ＋ リボに回した分 − 返した分）・毎月の返済額・借入残高の修正 |
-| `summary.plans` | 計画ごと。購入・貯蓄は積立額の内訳（`saved`）と配分の予定（`plannedBonus`）。返済は期日の返す額の見込み（`repay.due`）・その日の口座残高の見込み（`bankThen`）・返せるか（`ok`）・返した後の余裕額（`slackAfter`） |
+| `summary.plans` | 計画ごと。購入・貯蓄は積立額の内訳（`saved`）と配分の予定（`plannedBonus`）。返済は期日の返す額の見込み（`repay.due`）・その日の口座残高の見込み（`bankThen`）・返せるか（`ok`）・返した後の最低残高（`lowAfter`：日付と額） |
 | `summary.outlook` | 日ごとの口座残高と余裕額（今日から6か月先。週に1回と月末）。先は見込み（予算どおりに使う前提） |
 | `settings`・`budgets`・`v5_months`・`v5_plans`・`v5_loans`・`v5_loan_balances`・`v5_moves`・`recurring`・`rules`・`balances` | 設定とマスタ（ops の key に使う名前・id が分かる） |
 | `account_entries`・`card_entries` | 口座明細・クレカ明細（直近1年。消したもの・財布の明細は入らない） |

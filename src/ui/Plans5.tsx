@@ -146,9 +146,9 @@ export function Plans5({ store, data, today, openPart }: { store: Store; data: A
               <div className="meta">{p.due_date ? `期日 ${md(p.due_date)}` : "期日なし（毎月の返済だけ）"}{p.done ? "・完了" : ""}</div>
               {v && (
                 <div className="stat3" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => openPart(v.due)}><span className="k">返済額</span><span className="n">{money(v.due.amount)}</span></button>
-                  <button onClick={() => openPart(v.bankThen)}><span className="k">期日の口座残高</span><span className="n">{money(v.bankThen.amount)}</span></button>
-                  <button onClick={() => openPart(v.slackAfter)}><span className="k">返済後の余裕額</span><span className={`n ${v.slackAfter.amount < 0 ? "neg" : ""}`}>{money(v.slackAfter.amount)}</span></button>
+                  <button onClick={() => openPart(v.due)}><span className="k">返済額</span><span className="n">{money(v.due.amount)}<span className="go">›</span></span></button>
+                  <button onClick={() => openPart(v.bankThen)}><span className="k">期日の口座残高</span><span className="n">{money(v.bankThen.amount)}<span className="go">›</span></span></button>
+                  <button onClick={() => openPart(v.lowAfter)}><span className="k">返済後の最低残高</span><span className={`n ${v.lowAfter.amount < 0 ? "neg" : ""}`}>{money(v.lowAfter.amount)}<span className="go">›</span></span></button>
                 </div>
               )}
               <div className="list" onClick={(e) => e.stopPropagation()}>{ls.map(loanRow)}</div>

@@ -99,7 +99,7 @@ export function Outlook5({ data, today, onOpen }: { data: AppData; today: string
             <div className="cathead" style={{ cursor: "default" }}><span className="n">{ymLabel(m)}</span></div>
             <div className="list">
               {withBal.filter((r) => ymOf(r.date) === m).map((r, i) => (
-                <button key={r.ref.id + i} className={`row ${r.virtual ? "plan" : ""}`} style={r.virtual ? { border: "1px dashed var(--line)" } : undefined} onClick={() => open(r.ref.id, r.ref.kind)}>
+                <button key={r.ref.id + i} className={`row ${r.virtual ? "plan" : ""}`} style={r.virtual ? { border: "1px dashed var(--line)" } : undefined} disabled={r.ref.kind !== "account"} onClick={() => open(r.ref.id, r.ref.kind)}>
                   <span className="d num">{md(r.date)}</span>
                   <span className="t"><div>{r.name} {r.virtual && <Chip kind="warn">見込</Chip>}</div><div className="num">残高 {money(r.balance)}</div></span>
                   <span className={`a num ${r.amount > 0 ? "pos" : ""}`}>{r.amount > 0 ? "＋" : ""}{signed(r.amount)}</span>

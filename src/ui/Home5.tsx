@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { addDays, bankOn, budgetCats, budgetView, groupOfCat, isLive, lastDay, lowest, outlook, RESERVE, savingsTotal, slackAt, slackOn, type Part } from "../engine";
+import { addDays, bankOn, budgetCats, budgetView, groupOfCat, isLive, lastDay, lowest, outlook, RESERVE, savingsTotal, slackAt, type Part } from "../engine";
 import { actions, actions5, type AppData, type Store } from "../data/store";
 import { Bar, cardOfPay, cardTitle, accountTitle, Chip, Field, md, money, NumInput, Select, toast, yen } from "./common";
 import type { OpenPart } from "./Parts";
@@ -85,8 +85,7 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
   const days = useMemo(() => (data.balances.length ? outlook(data, today, today, addDays(today, 60)) : []), [data, today]);
   const bankNow = useMemo(() => bankOn(data, today).amount, [data, today]);
   const low = useMemo(() => lowest(data, today, addDays(today, 60)), [data, today]);
-  const repay = data.v5.plans.filter((p) => p.kind === "repay" && !p.done && p.due_date && p.due_date >= today).sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0];
-  const ahead = useMemo(() => (repay ? { label: `返済後（${md(repay.due_date!)}）`, amount: slackOn(data, repay.due_date!, today).amount } : days.length ? { label: "60日後", amount: days[days.length - 1].slack } : null), [data, today, repay, days]);
+  const ahead = days.length ? { label: "60日後", amount: days[days.length - 1].slack } : null;
   const recent = useMemo(() => [
     ...data.cards.filter((e) => isLive(e) && e.status === "confirmed" && e.date <= today).map((e) => ({ date: e.date, at: e.at ?? "", key: e.id, title: cardTitle(e), amount: -e.amount, mail: MAIL.has(e.source), open: () => onOpen({ type: "card", entry: e }) })),
     ...data.accounts.filter((e) => e.account === "bank" && e.status === "confirmed" && e.date <= today && e.group !== "card").map((e) => ({ date: e.date, at: e.at ?? "", key: e.id, title: accountTitle(e), amount: e.direction === "in" ? e.amount : -e.amount, mail: false, open: () => onOpen({ type: "account", entry: e }) })),
@@ -100,15 +99,15 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
       <section className="hero">
         <button className={`tile ${v.left.amount < 0 ? "neg" : ""}`} onClick={() => openPart(leftPart)} aria-label="予算残額の内訳">
           <span className="lb">予算残額</span>
-          <span className="v">{money(v.left.amount)}</span>
+          <span className="v">{money(v.left.amount)}<span className="go">›</span></span>
           <span className={`meter ${v.left.amount < 0 ? "over" : ""}`}><i style={{ width: `${pct(used, v.budget)}%` }} /><i className="p" style={{ width: `${pct(planned, v.budget)}%` }} /></span>
           <span className="sub2"><span>予算 <b>{money(v.budget)}</b></span><span>残り{daysLeft}日{v.left.amount > 0 && daysLeft ? `・1日 ${money(Math.floor(v.left.amount / daysLeft))}` : ""}</span></span>
         </button>
         <button className={`tile slack ${slack.amount < 0 ? "neg" : ""}`} onClick={() => openPart(slack)} aria-label="余裕額の内訳">
           <span className="lb">余裕額</span>
-          <span className="v">{money(slack.amount)}</span>
+          <span className="v">{money(slack.amount)}<span className="go">›</span></span>
           <Spark days={days} />
-          <span className="sub2">{ahead ? <span>{ahead.label} <b className={ahead.amount < 0 ? "neg" : ""}>{money(ahead.amount)}</b></span> : <span />}{savings.amount > 0 && <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); openPart(savings); }}>うち貯蓄 <b>{money(savings.amount)}</b></span>}</span>
+          <span className="sub2">{ahead ? <span>{ahead.label} <b className={ahead.amount < 0 ? "neg" : ""}>{money(ahead.amount)}</b></span> : <span />}{savings.amount > 0 && <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); openPart(savings); }}>うち貯蓄 <b>{money(savings.amount)}</b><span className="go">›</span></span>}</span>
         </button>
       </section>
       {data.balances.length > 0 && (

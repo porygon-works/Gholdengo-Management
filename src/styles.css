@@ -97,7 +97,7 @@ h2 small { font-weight: 400; color: var(--mut); font-size: 12px; }
 .list { display: grid; }
 .row { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 10px 4px; border: 0; border-bottom: 1px solid var(--line); cursor: pointer; background: none; text-align: left; width: 100%; }
 .row:last-child { border-bottom: 0; }
-.row:hover { background: var(--sunk); }
+.row { cursor: default; }
 .row .d { font-size: 12px; color: var(--mut); }
 .row .t { min-width: 0; }
 .row .t div:first-child { font-weight: 500; overflow-wrap: anywhere; }
@@ -261,10 +261,22 @@ details.why summary, details.panel summary { font-size: 13px; color: var(--accen
 .formula .fl:disabled { cursor: default; color: inherit; }
 .formula .fl .sg { color: var(--mut); font-family: var(--f-num); font-weight: 700; }
 .formula .fl .am { font-family: var(--f-num); font-weight: 700; white-space: nowrap; }
-.formula .fl .go { color: var(--mut); margin-left: 4px; }
 .formula .tot { display: flex; justify-content: space-between; padding: 10px 4px 4px; font-weight: 700; font-size: 16px; }
 .formula .tot .am { font-family: var(--f-num); }
 .neg { color: var(--bad); }
 .pos { color: var(--accent); }
 .pcard.lowbad { border-color: var(--bad); background: color-mix(in srgb, var(--bad-soft) 55%, var(--surface)); }
 .pcard .meta b { font-family: var(--f-num); }
+
+/* 押せるところの印（設計書 §4.1.1 の7）：内訳が出る数字は金の「›」、開いて見る・直すものは右端に灰の「›」、押せないものは印なし */
+.go { color: var(--accent); font-weight: 700; margin-left: .2em; font-family: var(--f-num); }
+.tile .v .go { font-size: .7em; vertical-align: .12em; }
+button.row:not(:disabled), .row[role=button], button.crow { position: relative; padding-right: 22px; cursor: pointer; }
+button.row:not(:disabled)::after, .row[role=button]::after, button.crow::after { content: "›"; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: var(--mut); font-size: 18px; line-height: 1; }
+button.pcard .nm::after, .pcard[role=button] .nm::after { content: "›"; color: var(--mut); margin-left: .35em; font-weight: 400; }
+.pcard:not(button):not([role=button]) { cursor: default; }
+button.row:disabled { color: inherit; opacity: 1; }
+/* 押したときは、押せるもの全部で同じように面の色が変わる */
+button.row:not(:disabled):hover, .row[role=button]:hover, button.crow:hover { background: var(--sunk); }
+button.row:not(:disabled):active, .row[role=button]:active, button.crow:active, button.pcard:active, .pcard[role=button]:active, .tile:active, .stat3 > button:active, .formula .fl:not(:disabled):active { background: color-mix(in srgb, var(--gold) 16%, var(--surface)); }
+.formula .fl:not(:disabled) { cursor: pointer; }
