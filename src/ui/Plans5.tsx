@@ -5,7 +5,7 @@ import { Chip, Field, md, money, NumInput, Select, Sheet, toast } from "./common
 import { PartNum, type OpenPart } from "./Parts";
 import { ConfirmChange } from "./Preview";
 
-// v5 の計画（設計書 §3.3・§3.4）：返済計画（返済先を含む）・貯蓄計画・取崩順
+// v5 の計画（設計書 §3.3・§3.4）：返済計画（返済先を含む）・貯蓄計画
 
 /** 貯蓄計画は、使う日があれば buy（積立が使う日で止まり、買った明細をひも付けられる）、なければ save */
 const saveKind = (due: string): PlanKind => (due ? "buy" : "save");
@@ -75,7 +75,7 @@ function PlanSheet({ store, data, today, plan, repay, onClose }: { store: Store;
       <Field label="名前"><input value={name} onChange={(e) => setName(e.target.value)} placeholder={repay ? "リボを12月に返す" : "生活費1か月分"} /></Field>
       <div className="grid2">
         {!repay && <Field label="目標額"><NumInput value={target} onChange={setTarget} /></Field>}
-        <Field label={repay ? "期日" : "使う日"} hint={repay ? "まとめて返す日。空なら毎月の返済だけ" : "なくてもよい。あると、その月で積立が止まり、買った明細をひも付けられる"}><input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
+        <Field label={repay ? "期日" : "使う日"} hint={repay ? "まとめて返す日。空なら毎月の返済だけ" : "大きい買い物など。あると、ためた額を確保額として余裕額から引き、買った明細をひも付けられる。なければ余裕額に含めたまま「うち貯蓄」に出す"}><input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
         {!repay && <Field label="毎月の積立額"><NumInput value={monthly} onChange={setMonthly} /></Field>}
         {!repay && <Field label="始める月"><input type="month" value={start} onChange={(e) => setStart(e.target.value)} /></Field>}
       </div>
@@ -119,9 +119,7 @@ export function Plans5({ store, data, today, openPart }: { store: Store; data: A
   const repays = plans.filter((p) => p.kind === "repay");
   const saves = plans.filter((p) => p.kind !== "repay");
   const loose = data.v5.loans.filter((l) => !repays.some((p) => p.id === l.plan_id));
-  const drawable = saves.filter((p) => !p.done).sort((a, b) => a.draw_order - b.draw_order);
   const views = useMemo(() => new Map(repays.map((p) => [p.id, repayView(data, p, today)])), [data, today]); // eslint-disable-line react-hooks/exhaustive-deps
-  const moveOrder = (i: number, k: number) => { const ids = drawable.map((p) => p.id); const j = i + k; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; store.run(() => actions5.setDrawOrder(ids)); };
 
   /** 返済先の1行：返済方法・毎月の返済額と、いまの借入残高 */
   const loanRow = (l: Loan) => {
@@ -179,31 +177,12 @@ export function Plans5({ store, data, today, openPart }: { store: Store; data: A
             <div key={p.id} className="pcard" onClick={() => setPlanSheet({ plan: p, repay: false })} role="button" tabIndex={0}>
               <div className="top"><span className="nm">{p.name}</span><span onClick={(e) => e.stopPropagation()}><PartNum part={now} open={openPart} /></span></div>
               <span className="meter"><i style={{ width: `${p.target ? Math.min(100, (now.amount / p.target) * 100) : 0}%` }} /></span>
-              <div className="meta">目標額 {money(p.target)}{p.done ? "・完了" : p.target ? (ok ? "・達成見込" : "・不足見込") : ""}{p.due_date ? `・使う日 ${md(p.due_date)}` : ""}{p.monthly ? `・毎月 ${money(p.monthly)}` : ""}{pb.length ? `・賞与配分（予定） ${money(pb.reduce((a, r) => a + r.amount, 0))}` : ""}{p.no_draw ? "・取崩不可" : ""}</div>
+              <div className="meta">目標額 {money(p.target)}{p.done ? "・完了" : p.target ? (ok ? "・達成見込" : "・不足見込") : ""}{p.due_date ? `・使う日 ${md(p.due_date)}` : ""}{p.monthly ? `・毎月 ${money(p.monthly)}` : ""}{pb.length ? `・賞与配分（予定） ${money(pb.reduce((a, r) => a + r.amount, 0))}` : ""}{p.due_date ? "・確保額" : "・余裕額に含む"}</div>
             </div>
           );
         })}
         {!saves.length && <div className="empty">貯蓄計画はありません（生活費1か月分・大きい買い物など）</div>}
       </section>
-
-      {drawable.length > 0 && (
-        <section>
-          <h2>取崩順 <small>余裕額がマイナスのとき上から取崩</small></h2>
-          <div className="panel"><div className="list">
-            {drawable.map((p, i) => (
-              <div key={p.id} className="row" style={{ gridTemplateColumns: "auto 1fr auto", cursor: "default" }}>
-                <span className="d num">{i + 1}</span>
-                <span className="t"><div>{p.name}</div></span>
-                <span className="a">
-                  <label className="check"><input type="checkbox" checked={p.no_draw} onChange={(e) => store.run(() => actions5.updatePlan(p.id, { no_draw: e.target.checked }))} />取崩不可</label>
-                  <button className="btn sm ghost" onClick={() => moveOrder(i, -1)} aria-label="上へ">↑</button>
-                  <button className="btn sm ghost" onClick={() => moveOrder(i, 1)} aria-label="下へ">↓</button>
-                </span>
-              </div>
-            ))}
-          </div></div>
-        </section>
-      )}
 
       {loanSheet && <LoanSheet store={store} data={data} today={today} loan={loanSheet.loan} planId={loanSheet.planId} onClose={() => setLoanSheet(null)} />}
       {planSheet && <PlanSheet store={store} data={data} today={today} repay={planSheet.repay} plan={planSheet.plan && (data.v5.plans.find((p) => p.id === planSheet.plan!.id) ?? planSheet.plan)} onClose={() => setPlanSheet(null)} />}

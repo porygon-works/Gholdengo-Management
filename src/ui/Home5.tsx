@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { addDays, bankOn, budgetCats, budgetView, drawPlan, groupOfCat, isLive, lastDay, lowest, outlook, RESERVE, slackAt, slackOn, type Part } from "../engine";
+import { addDays, bankOn, budgetCats, budgetView, groupOfCat, isLive, lastDay, lowest, outlook, RESERVE, savingsTotal, slackAt, slackOn, type Part } from "../engine";
 import { actions, actions5, type AppData, type Store } from "../data/store";
 import { Bar, cardOfPay, cardTitle, accountTitle, Chip, Field, md, money, NumInput, Select, toast, yen } from "./common";
 import type { OpenPart } from "./Parts";
@@ -73,10 +73,8 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
   const ym = today.slice(0, 7);
   const v = budgetView(data, ym, today);
   const slack = useMemo(() => slackAt(data, today, today), [data, today]);
-  const loans = slack.parts!.find((p) => p.key === "due")!.parts!.find((p) => p.key === "loans")!.amount;
-  // 使いすぎで余裕額がマイナスになった分（借入残高のせいのマイナスは崩さない。設計書 §3.5）
-  const over = Math.max(0, -(slack.amount + loans));
-  const draws = over ? drawPlan(data, over, today) : [];
+  // 余裕額のうち、使う日のない貯蓄計画にたまっている分（設計書 §2.2）
+  const savings = useMemo(() => savingsTotal(data, today), [data, today]);
   // 予算残額の内訳の「予算」から、目安額の式までたどれるようにする
   const leftPart: Part = { ...v.left, parts: v.left.parts!.map((p) => (p.key === "budget" ? { ...p, label: v.source === "decided" ? "予算（決定額）" : "予算（目安額）", parts: v.guide.parts } : p)) };
   const vars = v.cats.filter((c) => !c.fixed && (c.budget || c.used || c.planned));
@@ -94,12 +92,6 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
     ...data.accounts.filter((e) => e.account === "bank" && e.status === "confirmed" && e.date <= today && e.group !== "card").map((e) => ({ date: e.date, at: e.at ?? "", key: e.id, title: accountTitle(e), amount: e.direction === "in" ? e.amount : -e.amount, mail: false, open: () => onOpen({ type: "account", entry: e }) })),
   ].sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at)).slice(0, 8), [data, today, onOpen]);
 
-  const applyDraw = async () => {
-    if (!draws.length) return;
-    const ok = await store.run(async () => { for (const x of draws) await actions5.addMove({ plan_id: x.plan.id, kind: "draw", amount: x.amount, date: today, bonus_entry_id: null, entry_kind: null, entry_id: null, memo: "余裕額のマイナスを埋める" }); });
-    if (ok) toast("確保額から差し引きました");
-  };
-
   return (
     <>
       {reviews > 0 && <button className="alert" onClick={() => go("review")} style={{ marginBottom: 16 }}>要確認 {reviews} 件（重複の候補など）</button>}
@@ -116,7 +108,7 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
           <span className="lb">余裕額</span>
           <span className="v">{money(slack.amount)}</span>
           <Spark days={days} />
-          <span className="sub2">{ahead ? <span>{ahead.label} <b className={ahead.amount < 0 ? "neg" : ""}>{money(ahead.amount)}</b></span> : <span />}</span>
+          <span className="sub2">{ahead ? <span>{ahead.label} <b className={ahead.amount < 0 ? "neg" : ""}>{money(ahead.amount)}</b></span> : <span />}{savings.amount > 0 && <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); openPart(savings); }}>うち貯蓄 <b>{money(savings.amount)}</b></span>}</span>
         </button>
       </section>
       {data.balances.length > 0 && (
@@ -125,7 +117,6 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
           <div className="meta">60日内の最低 <b className={low.bank < 0 ? "neg" : ""}>{md(low.date)} {money(low.bank)}</b>{low.bank < 0 ? "（残高不足）" : ""}</div>
         </button>
       )}
-      {over > 0 && draws.length > 0 && <div className="alert">使いすぎで余裕額がマイナスです。<button className="btn sm" onClick={applyDraw}>確保額から取崩（{draws.map((x) => `${x.plan.name} ${money(x.amount)}`).join("・")}）</button></div>}
 
       <section>
         <div className="sec-h"><h2>費目別残額</h2><button className="btn sm ghost" onClick={() => go("ledger")}>明細</button></div>

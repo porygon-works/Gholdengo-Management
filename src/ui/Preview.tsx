@@ -26,28 +26,21 @@ export function CompareBox({ c }: { c: Comparison }) {
   );
 }
 
-/**
- * 変更を、比べを見てから実行する。余裕額が 0 以上からマイナスになるなら、取崩順に確保額から差し引くかを聞く。
- * もとからマイナス・差し引ける確保額がないなら、注意だけ出して実行できる
- */
+/** 変更を、比べを見てから実行する。余裕額がマイナスになるなら注意だけ出す（設計書 §3.5） */
 export function ConfirmChange({ store, data, today, change, label, onDone }: { store: Store; data: AppData; today: string; change: Change; label: string; onDone: () => void }) {
   const c = useMemo(() => compare(data, change, today), [data, change, today]);
   const [busy, setBusy] = useState(false);
   const run = async () => {
     setBusy(true);
-    const ok = await store.run(async () => {
-      for (const x of c.draw ?? []) await actions5.addMove({ plan_id: x.plan.id, kind: "draw", amount: x.amount, date: today, bonus_entry_id: null, entry_kind: null, entry_id: null, memo: "余裕額のマイナスを埋める" });
-      await saveChange(data, change);
-    });
+    const ok = await store.run(() => saveChange(data, change));
     setBusy(false);
     if (ok) { toast("保存しました"); onDone(); }
   };
   return (
     <>
       <CompareBox c={c} />
-      {c.draw && c.draw.length > 0 && <div className="alert">{c.draw.map((x) => `${x.plan.name}から ${money(x.amount)}`).join("、")} を差し引きます。よろしいですか？</div>}
-      {c.warnOnly && <div className="alert bad">余裕額がマイナスです（{money(c.slack[1])}）。</div>}
-      <div className="btns"><button className="btn" disabled={busy} onClick={run}>{c.draw?.length ? "差し引いて" : ""}{label}</button></div>
+      {c.warn && <div className="alert bad">余裕額がマイナスです（{money(c.slack[1])}）。</div>}
+      <div className="btns"><button className="btn" disabled={busy} onClick={run}>{label}</button></div>
     </>
   );
 }

@@ -1,11 +1,10 @@
 import { addMonths, ymOf } from "./dates";
 import { budgetView } from "./budget5";
 import { lowest } from "./outlook";
-import { drawPlan } from "./reserve";
 import { slackValue } from "./slack";
-import type { AccountEntry, CardEntry, Data, PlanMove, V5Plan } from "./types";
+import type { AccountEntry, CardEntry, Data, PlanMove } from "./types";
 
-// 変更を当てる前と後の比べ（設計書 §4.3・§3.5）。保存する前に、何が変わるかを出す
+// 変更を当てる前と後の比べ（設計書 §4.3・§3.5）。保存する前に、何が変わるかを出す。余裕額がマイナスになっても止めない
 
 export type Change =
   | { kind: "addAccount"; entry: Omit<AccountEntry, "id"> }
@@ -30,8 +29,7 @@ export interface Comparison {
   budget: { month: string; before: number; after: number }; // その月の予算残額
   lowest: { date: string; bank: number }; // 後の、口座残高が一番少なくなる日（6か月先まで）
   shortBudget: number; // その月の予算残額のマイナスの分
-  draw: { plan: V5Plan; amount: number }[] | null; // 0 以上からマイナスになるときの、取崩順に差し引く計画と額
-  warnOnly: boolean; // マイナスだが、確保額から差し引かない（もとからマイナス・差し引ける確保額がない）
+  warn: boolean; // 後の余裕額がマイナス（注意だけ出す。確保額からは差し引かない）
 }
 
 export function compare(d: Data, c: Change, today: string): Comparison {
@@ -39,14 +37,11 @@ export function compare(d: Data, c: Change, today: string): Comparison {
   const month = monthOf(c, today);
   const s0 = slackValue(d, today, today), s1 = slackValue(after, today, today);
   const b0 = budgetView(d, month, today).left.amount, b1 = budgetView(after, month, today).left.amount;
-  const crossing = s0 >= 0 && s1 < 0;
-  const draw = crossing ? drawPlan(after, -s1, today) : null;
   return {
     slack: [s0, s1],
     budget: { month, before: b0, after: b1 },
     lowest: lowest(after, today, `${addMonths(ymOf(today), 6)}-01`),
     shortBudget: Math.max(0, -b1),
-    draw,
-    warnOnly: s1 < 0 && (!crossing || !draw?.length),
+    warn: s1 < 0,
   };
 }

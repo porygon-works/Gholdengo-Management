@@ -3,7 +3,7 @@ import { ofRows, sum, type Part, type PartRow } from "./breakdown";
 import { spendTarget } from "./links";
 import type { Data, V5Plan } from "./types";
 
-// 計画（購入・貯蓄）の積立額と確保額（設計書 §3.3）。返済の計画は積立額を持たない
+// 貯蓄計画の積立額と確保額（設計書 §2.2・§3.3）。返済計画は積立額を持たない
 
 const holds = (p: V5Plan) => p.kind !== "repay" && !p.done;
 
@@ -67,19 +67,15 @@ export function planMonthlyOf(d: Data, ym: string): number {
   }, 0);
 }
 
-/** t の日の確保額（購入・貯蓄の計画の積立額の合計） */
+/**
+ * t の日の確保額：使い道の決まったお金（使う日のある貯蓄計画の積立額の合計）。余裕額から引く。
+ * 使う日のない貯蓄計画は予算の計算にだけ使い、余裕額からは引かない（savingsTotal）
+ */
 export function reserveTotal(d: Data, t: string, projected = false): Part {
-  return sum("reserve", "確保額", d.v5.plans.filter(holds).map((p) => savedAt(d, p, t, projected)));
+  return sum("reserve", "確保額", d.v5.plans.filter((p) => holds(p) && p.kind === "buy").map((p) => savedAt(d, p, t, projected)));
 }
 
-/** 余裕額のマイナスを埋めるために、取崩順に差し引く計画と額（取崩不可は除く。足りなければあるだけ） */
-export function drawPlan(d: Data, need: number, t: string): { plan: V5Plan; amount: number }[] {
-  const out: { plan: V5Plan; amount: number }[] = [];
-  let left = need;
-  for (const p of d.v5.plans.filter((x) => holds(x) && !x.no_draw).sort((a, b) => a.draw_order - b.draw_order || a.sort - b.sort)) {
-    if (left <= 0) break;
-    const amount = Math.min(left, savedAt(d, p, t).amount);
-    if (amount > 0) { out.push({ plan: p, amount }); left -= amount; }
-  }
-  return out;
+/** t の日の、使う日のない貯蓄計画の積立額の合計（余裕額の「うち貯蓄」） */
+export function savingsTotal(d: Data, t: string, projected = false): Part {
+  return sum("savings", "うち貯蓄", d.v5.plans.filter((p) => holds(p) && p.kind === "save").map((p) => savedAt(d, p, t, projected)));
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { acc, bal, card, D } from "./fixture";
-import { budgetView, drawPlan, guideOf, planMonthlyOf, plannedBonus, savedAt, slackValue, type PlanMove, type V5Plan } from "./index";
+import { acc, bal, card, D, S } from "./fixture";
+import { budgetView, guideOf, outlook, planMonthlyOf, plannedBonus, savedAt, savingsTotal, slackAt, slackValue, type PlanMove, type V5Plan } from "./index";
 
 // 計画（設計書 §3.3）。値はすべて作り物
 const P = (p: Partial<V5Plan>): V5Plan => ({ id: p.id ?? "p1", kind: "save", name: "生活費1か月分", target: 300000, due_date: null, monthly: 50000, start_month: "2026-11", draw_order: 0, no_draw: false, done: false, sort: 0, ...p });
@@ -16,9 +16,9 @@ describe("積立額", () => {
     expect(planMonthlyOf(d, "2027-05")).toBe(0);
     expect(guideOf(d, "2026-11").parts!.find((p) => p.key === "planMonthly")!.amount).toBe(50000);
   });
-  it("余裕額から入れると、その分だけ余裕額が減る", () => {
+  it("使う日のある貯蓄計画に余裕額から入れると、その分だけ余裕額が減る（確保額）", () => {
     const base = { balances: [bal("2026-11-01", 100000)] };
-    const plan = P({ monthly: 0 });
+    const plan = P({ kind: "buy", due_date: "2027-03-31", monthly: 0 });
     const before = slackValue(D({ ...base, v5: { plans: [plan] } }), "2026-11-05", "2026-11-05");
     const after = slackValue(D({ ...base, v5: { plans: [plan], moves: [M({ amount: 20000 })] } }), "2026-11-05", "2026-11-05");
     expect(before - after).toBe(20000);
@@ -40,13 +40,22 @@ describe("積立額", () => {
   });
 });
 
-describe("取崩順", () => {
-  it("取崩順に、取崩不可を除いて差し引く", () => {
-    const d = D({ v5: {
-      plans: [P({ id: "A", monthly: 0, draw_order: 1 }), P({ id: "B", monthly: 0, draw_order: 2, no_draw: true }), P({ id: "C", monthly: 0, draw_order: 3 })],
-      moves: [M({ id: "1", plan_id: "A", amount: 20000 }), M({ id: "2", plan_id: "B", amount: 90000 }), M({ id: "3", plan_id: "C", amount: 50000 })],
-    } });
-    expect(drawPlan(d, 30000, "2026-11-10").map((x) => [x.plan.id, x.amount])).toEqual([["A", 20000], ["C", 10000]]);
+describe("使う日のない貯蓄計画", () => {
+  it("入れても余裕額は変わらない。たまった額は「うち貯蓄」に出て、確保額には入らない", () => {
+    const base = { balances: [bal("2026-11-01", 100000)] };
+    const plan = P({ monthly: 0 });
+    const before = slackValue(D({ ...base, v5: { plans: [plan] } }), "2026-11-05", "2026-11-05");
+    const d = D({ ...base, v5: { plans: [plan], moves: [M({ amount: 20000 })] } });
+    expect(slackValue(d, "2026-11-05", "2026-11-05")).toBe(before);
+    expect(slackAt(d, "2026-11-05", "2026-11-05").parts!.find((p) => p.key === "reserve")!.amount).toBe(0);
+    expect(savingsTotal(d, "2026-11-05").amount).toBe(20000);
+  });
+  it("予算を使い切っても、毎月の積立額の分だけ余裕額が月ごとに上がる", () => {
+    const d = D({ balances: [bal("2026-10-31", 100000)], settings: { ...S, salaryEstimate: 200000 }, v5: { plans: [P({ monthly: 20000, target: 0, start_month: "2026-11" })] } });
+    const days = outlook(d, "2026-11-01", "2026-11-01", "2027-02-28");
+    const slack = (t: string) => days.find((x) => x.date === t)!.slack;
+    expect(slack("2027-01-02") - slack("2026-12-02")).toBe(20000);
+    expect(slack("2027-02-02") - slack("2027-01-02")).toBe(20000);
   });
 });
 

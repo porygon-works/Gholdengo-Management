@@ -17,7 +17,7 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
 | 項目 | 中身 |
 | --- | --- |
 | `summary` | アプリが計算したまとめ。**数を答えるときはこれを使う**（自分で計算し直さない） |
-| `summary.slack` | 今日の余裕額と内訳。`parts` はアプリでタップすると出る式と同じ（口座残高 ＋ 未入金給与 ＋ 未回収立替 − 支払予定額 − 確保額）。説明するときはこの名前と数字を使う |
+| `summary.slack` | 今日の余裕額と内訳。`parts` はアプリでタップすると出る式と同じ（口座残高 ＋ 未入金給与 ＋ 未回収立替 − 支払予定額 − 確保額）。確保額は使う日のある貯蓄計画（buy）の積立額だけで、使う日のない貯蓄計画（save）は余裕額に入ったまま。説明するときはこの名前と数字を使う |
 | `summary.thisMonth`・`nextMonth` | その月の予算（`budget`・`budgetSource`：決めた額 `decided`／月の初めの目安額 `guide`／いまの目安額 `live`）・目安額の内訳（`guide`）・予算残額の内訳（`budgetLeft`）・費目ごと（`categories`） |
 | `summary.loans` | 借入ごとの借入残高の内訳（記録した残高 ＋ リボに回した分 − 返した分）・毎月の返済額・借入残高の修正 |
 | `summary.plans` | 計画ごと。購入・貯蓄は積立額の内訳（`saved`）と配分の予定（`plannedBonus`）。返済は期日の返す額の見込み（`repay.due`）・その日の口座残高の見込み（`bankThen`）・返せるか（`ok`）・返した後の余裕額（`slackAfter`） |
@@ -58,7 +58,7 @@ Google ドライブの `Gholdengo/gholdengo-snapshot.json`。アプリの「設�
 | --- | --- | --- | --- |
 | `budgets` | `month`（YYYY-MM）＋ `category` | `amount` | `amount` |
 | `v5_months` | `month` | `budget`（null で目安額に戻す。目安額より多い分は余裕額から出す） | `budget` |
-| `v5_plans` | `name` か `id` | `kind`（repay／buy／save）・`name`・`target`・`due_date`・`monthly`・`start_month`・`draw_order`・`no_draw`・`done`・`sort` | `kind` |
+| `v5_plans` | `name` か `id` | `kind`（repay／buy／save）・`name`・`target`・`due_date`・`monthly`・`start_month`・`draw_order`・`no_draw`（どちらも今は使わない）・`done`・`sort` | `kind` |
 | `v5_loans` | `name` か `id` | `name`・`card`（カードの請求と一緒に返すならカードの id）・`monthly`・`pay_day`・`plan`（期日にまとめて返す返済の計画の名前） | ― |
 | `v5_loan_balances` | なし（足すだけ） | `loan`（借入の名前）・`date`・`balance`（カードのサイトで見た額。前の記録との差は「借入残高の修正」になる） | 全部 |
 | `v5_moves` | 足すとき `ref`（見出し用）、消すとき `id` | `plan`（購入・貯蓄の計画の名前）・`kind`（manual：余裕額から入れる／bonus：賞与からの配分／draw：取り崩す）・`amount`・`date`・`bonus_ref`（bonus のとき、賞与の口座明細の ref か id）・`memo` | `plan`・`kind`・`amount`・`date` |
