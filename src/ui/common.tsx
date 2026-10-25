@@ -41,7 +41,8 @@ export function Toaster() {
 
 // ---------- 下から出るシート ----------
 
-export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+/** 下から出る板。見出しは上に止めておき、右に閉じる（×）、戻れるときは左に戻る（‹）を置く（スクロールしなくても閉じられる） */
+export function Sheet({ title, onClose, onBack, children }: { title: string; onClose: () => void; onBack?: () => void; children: ReactNode }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", k);
@@ -50,20 +51,26 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
   return (
     <div className="sheetbg" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sheet" role="dialog" aria-label={title}>
-        <h3>{title}</h3>
+        <div className="sheet-h">
+          {onBack && <button type="button" className="iconbtn" onClick={onBack} aria-label="戻る">‹</button>}
+          <h3>{title}</h3>
+          <button type="button" className="iconbtn" onClick={onClose} aria-label="閉じる">×</button>
+        </div>
         {children}
       </div>
     </div>
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+/** 入力欄と名前。ボタンを並べたもの（group）は label で包まない（label の中を押すと、最初のボタンが押されてしまうため） */
+export function Field({ label, hint, group, children }: { label: string; hint?: string; group?: boolean; children: ReactNode }) {
+  const Tag = group ? "div" : "label";
   return (
-    <label className="field">
+    <Tag className="field">
       <span className="flabel">{label}</span>
       {children}
       {hint && <span className="note">{hint}</span>}
-    </label>
+    </Tag>
   );
 }
 

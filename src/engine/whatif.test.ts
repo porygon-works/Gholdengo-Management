@@ -37,6 +37,13 @@ describe("予定を入れる前の比べ", () => {
     expect(c.warn).toBe(true);
   });
 
+  it("もとからマイナスでも、余裕額が動かない変更（予算の中で使う）なら注意は出さない", () => {
+    const d = D({ balances: [bal("2026-11-01", 0)], v5: { loans: [{ id: "l", plan_id: null, name: "リボ", card: null, monthly: 0, pay_day: 27, sort: 0 }], balances: [{ id: "x", loan_id: "l", date: "2026-11-01", balance: 200000 }] } });
+    const c = compare(d, { kind: "decideBudget", month: "2026-12", amount: 0 }, "2026-11-05");
+    expect(c.slack[1]).toBe(c.slack[0]);
+    expect(c.warn).toBe(false);
+  });
+
   it("元のデータは変えない", () => {
     const d = example();
     const before = JSON.stringify(d);

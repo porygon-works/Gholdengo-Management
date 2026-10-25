@@ -1,53 +1,11 @@
-import { useMemo, useState } from "react";
-import { addDays, bankOn, budgetCats, budgetView, groupOfCat, isLive, lastDay, lowest, outlook, RESERVE, savingsTotal, slackAt, type Part } from "../engine";
-import { actions, actions5, type AppData, type Store } from "../data/store";
-import { Bar, cardOfPay, cardTitle, accountTitle, Chip, Field, md, money, NumInput, Select, toast, yen } from "./common";
+import { useMemo } from "react";
+import { addDays, bankOn, budgetView, isLive, lastDay, lowest, outlook, savingsTotal, slackAt, type Part } from "../engine";
+import type { AppData } from "../data/store";
+import { Bar, cardTitle, accountTitle, Chip, md, money, yen } from "./common";
 import type { OpenPart } from "./Parts";
 import type { Open } from "./Sheets";
 
-// v5 のホーム（設計書 §4.2）：予算残額・費目別残額・最近の明細・余裕額・使ったものを入れる
-
-type Pay5 = string;
-// 払い方は設定のカード（あとから足せる）と PayPay・口座・現金（ATM で引き出した額。設計書 §3.6・§6.1）
-const payOptions5 = (d: AppData): Pay5[] => [...d.settings.cards.map((c) => `card:${c.id}`), "paypay", "bank", "atm"];
-const payLabels5 = (d: AppData): Record<Pay5, string> => ({ ...Object.fromEntries(d.settings.cards.map((c) => [`card:${c.id}`, c.name])), paypay: "PayPay", bank: "口座", atm: "現金" });
-
-/** 使ったものを入れる。クレカはクレカ明細、PayPay・口座は口座明細、ATM は費目「現金」の口座の出金 */
-function QuickForm5({ store, data, today }: { store: Store; data: AppData; today: string }) {
-  const s = data.settings;
-  const cats = budgetCats(s).filter((c) => c !== RESERVE);
-  const [cat, setCat] = useState(cats[0]);
-  const [amount, setAmount] = useState<number | "">("");
-  const [pay, setPay] = useState<Pay5>(payOptions5(data)[0]);
-  const [date, setDate] = useState(today);
-  const [name, setName] = useState("");
-  const [more, setMore] = useState(false);
-  const add = async () => {
-    if (!amount) { toast("金額を入れてください"); return; }
-    const card = cardOfPay(pay);
-    const group = groupOfCat(s, cat);
-    const ok = await store.run(() => pay === "atm" ? actions5.addAtm(date, amount)
-      : card ? actions.addCard({ card, status: "confirmed", date, amount, group, category: cat, name, shop: "" })
-      : actions.addAccount({ account: "bank", direction: "out", status: "confirmed", group, category: cat, name: name || (pay === "paypay" ? "PayPayチャージ" : ""), date, amount }));
-    if (ok) { toast(`${pay === "atm" ? "現金" : cat} ${yen(amount)}円を入力しました`); setAmount(""); setName(""); setDate(today); setMore(false); }
-  };
-  return (
-    <div className="panel quick">
-      <div className="grid2">
-        {pay === "atm" ? <Field label="費目"><input value="現金" disabled /></Field> : <Field label="費目"><Select value={cat} options={cats} onChange={setCat} /></Field>}
-        <Field label="金額"><NumInput value={amount} onChange={setAmount} placeholder="0" /></Field>
-      </div>
-      <div className="seg" role="group" aria-label="払い方">
-        {payOptions5(data).map((k) => <button key={k} type="button" aria-pressed={pay === k} onClick={() => setPay(k)}>{payLabels5(data)[k]}</button>)}
-      </div>
-      {more && <div className="grid2"><Field label="日付"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field><Field label="名称"><input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>}
-      <div className="btns">
-        <button className="btn" onClick={add}>入力</button>
-        {!more && <button className="btn ghost" onClick={() => setMore(true)}>詳細</button>}
-      </div>
-    </div>
-  );
-}
+// v5 のホーム（設計書 §4.2）：予算残額・余裕額・口座残高・費目別残額・最近の明細。入力は入力の画面（§4.4）
 
 const MAIL = new Set(["card_flash", "card_statement"]);
 const pct = (x: number, of: number) => (of > 0 ? Math.max(0, Math.min(100, (x / of) * 100)) : 0);
@@ -66,8 +24,8 @@ function Spark({ days }: { days: { slack: number }[] }) {
   );
 }
 
-export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
-  store: Store; data: AppData; today: string; reviews: number; openPart: OpenPart; onOpen: (o: Open) => void;
+export function Home5({ data, today, reviews, openPart, onOpen, go }: {
+  data: AppData; today: string; reviews: number; openPart: OpenPart; onOpen: (o: Open) => void;
   go: (to: "ledger" | "review" | "settings" | "plans" | "outlook", cat?: string) => void;
 }) {
   const ym = today.slice(0, 7);
@@ -135,10 +93,6 @@ export function Home5({ store, data, today, reviews, openPart, onOpen, go }: {
         </div>
       </section>
 
-      <section>
-        <h2>支出入力</h2>
-        <QuickForm5 store={store} data={data} today={today} />
-      </section>
 
       <section>
         <h2>最新明細</h2>

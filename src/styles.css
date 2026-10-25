@@ -148,7 +148,10 @@ button.alert { text-align: left; cursor: pointer; width: 100%; }
 
 .sheetbg { position: fixed; inset: 0; background: rgba(10, 15, 12, .45); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
 .sheet { background: var(--surface); width: 100%; max-width: 560px; border-radius: 16px 16px 0 0; padding: 18px max(16px, env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); display: grid; gap: 12px; max-height: 90vh; overflow: auto; }
-.sheet h3 { margin: 0; font-size: 16px; }
+.sheet h3 { margin: 0; font-size: 16px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* 見出しは板の上に止める（下までスクロールしなくても閉じられる） */
+.sheet-h { position: sticky; top: -18px; z-index: 2; display: flex; align-items: center; gap: 8px; background: var(--surface); margin: -18px 0 0; padding: 14px 0 8px; border-bottom: 1px solid var(--line); }
+.sheet-h .iconbtn { flex: none; font-size: 22px; line-height: 1; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(80px + env(safe-area-inset-bottom)); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 13px; z-index: 30; max-width: 90vw; }
 .empty { padding: 28px 8px; text-align: center; color: var(--mut); }
 .login { max-width: 360px; margin: 18vh auto 0; display: grid; gap: 12px; padding: 0 16px; }
@@ -282,3 +285,9 @@ button.row:not(:disabled):active, .row[role=button]:active, button.crow:active, 
 .formula .fl:not(:disabled) { cursor: pointer; }
 .stat3 > button { align-content: space-between; }
 .filepick { display: inline-block; justify-self: start; }
+
+/* iPhone は 16px より小さい入力欄を押すと画面を拡大し、そのまま戻らない。入力欄の文字は 16px にする */
+input, select, textarea { font-size: 16px; }
+/* 入力の画面の「出金・入金・残高・計画」：横いっぱいに4つ並べる */
+.seg4 { display: grid; grid-template-columns: repeat(4, 1fr); }
+.seg4 button { padding: 10px 0; font-size: 15px; font-weight: 700; text-align: center; }
