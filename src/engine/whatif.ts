@@ -29,7 +29,7 @@ export interface Comparison {
   budget: { month: string; before: number; after: number }; // その月の予算残額
   lowest: { date: string; bank: number }; // 後の、口座残高が一番少なくなる日（6か月先まで）
   shortBudget: number; // その月の予算残額のマイナスの分
-  warn: boolean; // 後の余裕額がマイナス（注意だけ出す。確保額からは差し引かない）
+  warn: boolean; // 後の余裕額がマイナスで、前より減る（注意だけ出す。確保額からは差し引かない。予算の中で使うだけなら余裕額は動かないので出さない）
 }
 
 export function compare(d: Data, c: Change, today: string): Comparison {
@@ -42,6 +42,6 @@ export function compare(d: Data, c: Change, today: string): Comparison {
     budget: { month, before: b0, after: b1 },
     lowest: lowest(after, today, `${addMonths(ymOf(today), 6)}-01`),
     shortBudget: Math.max(0, -b1),
-    warn: s1 < 0,
+    warn: s1 < 0 && s1 < s0,
   };
 }

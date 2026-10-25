@@ -9,31 +9,13 @@ import {
   ACCOUNT_GROUP_LABEL, ACCOUNT_SOURCE_LABEL, accountTitle, CARD_GROUP_LABEL, CARD_SOURCE_LABEL, cardTitle, Field, md, NumInput, Select, Sheet, signed, StatusChip, toast, yen,
 } from "./common";
 
-/** 開くもの：口座明細・クレカ明細・新しく入れる */
+/** 開くもの：口座明細・クレカ明細（新しく入れるのは入力の画面。設計書 §4.4） */
 export type Open =
   | { type: "account"; entry?: AccountEntry; preset?: Partial<AccountEntry> }
-  | { type: "card"; entry?: CardEntry; preset?: Partial<CardEntry> }
-  | { type: "new"; plan?: boolean };
+  | { type: "card"; entry?: CardEntry; preset?: Partial<CardEntry> };
 
 const UNC = "未分類";
 const catOptions = (d: AppData) => [UNC, ...budgetCats(d.settings).filter((c) => c !== RESERVE)];
-
-/** 新しく入れる：クレカ明細か口座明細かを選ぶ */
-export function NewSheet({ store, data, plan, onClose }: { store: Store; data: AppData; plan?: boolean; onClose: () => void }) {
-  const [kind, setKind] = useState<"card" | "account">("card");
-  return kind === "card"
-    ? <CardSheet store={store} data={data} preset={{ status: plan ? "plan" : "confirmed" }} onClose={onClose} switcher={<Switch kind={kind} setKind={setKind} />} />
-    : <AccountSheet store={store} data={data} preset={{ status: plan ? "plan" : "confirmed" }} onClose={onClose} switcher={<Switch kind={kind} setKind={setKind} />} />;
-}
-
-function Switch({ kind, setKind }: { kind: "card" | "account"; setKind: (k: "card" | "account") => void }) {
-  return (
-    <div className="seg" role="group" aria-label="どの明細か">
-      <button type="button" aria-pressed={kind === "card"} onClick={() => setKind("card")}>クレカ明細</button>
-      <button type="button" aria-pressed={kind === "account"} onClick={() => setKind("account")}>口座明細</button>
-    </div>
-  );
-}
 
 // ---------- クレカ明細 ----------
 

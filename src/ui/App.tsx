@@ -9,29 +9,30 @@ import { Outlook5 } from "./Outlook5";
 import { Plans5 } from "./Plans5";
 import { PartSheet } from "./Parts";
 import type { Part, PartRow } from "../engine";
-import { AccountSheet, CardSheet, NewSheet, type Open } from "./Sheets";
-import { BalanceSheet } from "./Balance";
+import { AccountSheet, CardSheet, type Open } from "./Sheets";
+import { Input5, type InputKind } from "./Input5";
 import { Ledger5 } from "./Ledger5";
 import { Login } from "./Login";
 import { VERSION_LABEL } from "./version";
 import { reviewCount, ReviewView } from "./Review";
 import { SettingsView } from "./Settings";
 
-type Screen = "home" | "ledger" | "flow" | "plans" | "settings" | "review";
-const TITLES: Record<Screen, string> = { home: "ホーム", ledger: "明細", flow: "見通し", plans: "計画", settings: "設定", review: "要確認" };
-const TAB_LABEL: Record<string, string> = { home: "ホーム", ledger: "明細", flow: "見通し", plans: "計画", settings: "設定" };
-const SCREENS: Screen[] = ["home", "ledger", "flow", "plans", "settings", "review"];
+type Screen = "home" | "ledger" | "input" | "flow" | "plans" | "settings" | "review";
+const TITLES: Record<Screen, string> = { home: "ホーム", ledger: "明細", input: "入力", flow: "見通し", plans: "計画", settings: "設定", review: "要確認" };
+const TAB_LABEL: Record<string, string> = { home: "ホーム", ledger: "明細", input: "入力", flow: "見通し", plans: "計画" };
+const SCREENS: Screen[] = ["home", "ledger", "input", "flow", "plans", "settings", "review"];
 const WITH_MONTH: Screen[] = ["ledger", "settings"];
 
 const ICONS = {
   home: <path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
   ledger: <path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" />,
+  input: <><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></>,
   flow: <path d="M3 19h18M4 15l5-5 4 3 7-7" />,
   plans: <><path d="M4 6h16M4 12h10M4 18h6" /><circle cx="18" cy="16" r="3" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></>,
 };
 
-type SheetState = Open | { type: "balance" } | null;
+type SheetState = Open | null;
 
 export function App() {
   const [session, setSession] = useState<Session | null | undefined>(supabase ? undefined : null);
@@ -56,6 +57,10 @@ function Main() {
   const [sheet, setSheet] = useState<SheetState>(null);
   const [focusCat, setFocusCat] = useState<string | null>(null);
   const [part, setPart] = useState<Part | null>(null);
+  // 入力の画面で何を入れるか（開いたときは出金。設計書 §4.4）
+  const [inputKind, setInputKind] = useState<InputKind>("out");
+  const [inGroup, setInGroup] = useState<"salary" | "bonus" | undefined>(undefined);
+  const openInput = (k: InputKind, g?: "salary" | "bonus") => { setInputKind(k); setInGroup(g); go("input"); };
 
   useEffect(() => { try { localStorage.setItem("gholdengo.screen", screen); } catch { /* なし */ } }, [screen]);
   const go = (s: Screen) => { setScreen(s); setMenu(false); window.scrollTo(0, 0); };
@@ -94,22 +99,23 @@ function Main() {
 
         {!data ? <div className="empty">読み込み中…</div> : (
           <main>
-            {screen === "home" && <Home5 store={store} data={data} today={today} reviews={reviews} openPart={setPart} onOpen={openEntry} go={(to, cat) => {
+            {screen === "home" && <Home5 data={data} today={today} reviews={reviews} openPart={setPart} onOpen={openEntry} go={(to, cat) => {
               if (to === "ledger") { setFocusCat(cat ?? null); setMonth(ymOf(today)); go("ledger"); }
               else go(to === "outlook" ? "flow" : to);
             }} />}
-            {screen === "ledger" && <Ledger5 data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "new" })} />}
+            {screen === "ledger" && <Ledger5 data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={(k) => openInput(k)} />}
+            {screen === "input" && <Input5 store={store} data={data} today={today} kind={inputKind} setKind={setInputKind} inGroup={inGroup} onOpen={openEntry} />}
             {screen === "flow" && <Outlook5 data={data} today={today} onOpen={openEntry} />}
             {screen === "plans" && <Plans5 store={store} data={data} today={today} openPart={setPart} />}
-            {screen === "settings" && <SettingsView store={store} data={data} month={month} onOpen={openEntry} />}
+            {screen === "settings" && <SettingsView store={store} data={data} month={month} onOpen={openEntry} onInput={() => openInput("in", "bonus")} />}
             {screen === "review" && <ReviewView store={store} data={data} today={today} onOpen={openEntry} />}
           </main>
         )}
       </div>
 
       <nav className="tabs" role="tablist">
-        {(["home", "ledger", "flow", "plans", "settings"] as const).map((t) => (
-          <button key={t} role="tab" aria-selected={screen === t} onClick={() => { if (t === "ledger") setFocusCat(null); go(t); }}>
+        {(["home", "ledger", "input", "flow", "plans"] as const).map((t) => (
+          <button key={t} role="tab" aria-selected={screen === t} onClick={() => { if (t === "ledger") setFocusCat(null); if (t === "input") setInputKind("out"); go(t); }}>
             <svg viewBox="0 0 24 24">{ICONS[t]}</svg>{TAB_LABEL[t]}
           </button>
         ))}
@@ -120,11 +126,9 @@ function Main() {
           <div className="drawerbg" onClick={() => setMenu(false)} />
           <nav className="drawer" aria-label="メニュー">
             <h3>メニュー</h3>
-            <button onClick={() => { setMenu(false); setSheet({ type: "balance" }); }}>口座残高</button>
-            <button onClick={() => go("review")}>要確認 <span className="num">{reviews || ""}</span></button>
-            <button onClick={() => go("flow")}>見通し</button>
-            <button onClick={() => go("plans")}>計画</button>
             <button onClick={() => go("settings")}>設定</button>
+            <button onClick={() => openInput("balance")}>残高入力</button>
+            <button onClick={() => go("review")}>要確認 <span className="num">{reviews || ""}</span></button>
             <button onClick={() => { setMenu(false); store.refresh(); }}>再読込</button>
             {supabase && <button onClick={() => supabase!.auth.signOut()}>ログアウト</button>}
             <div className="note">{backend.mode === "local" ? "お試しモード：データはこの端末のブラウザの中だけにあります。" : "データは Supabase に保存しています。"}</div>
@@ -133,10 +137,8 @@ function Main() {
         </>
       )}
 
-      {data && sheet?.type === "new" && <NewSheet store={store} data={data} plan={sheet.plan} onClose={() => setSheet(null)} />}
       {data && sheet?.type === "card" && <CardSheet store={store} data={data} entry={sheet.entry} preset={sheet.preset} onClose={() => setSheet(null)} />}
       {data && sheet?.type === "account" && <AccountSheet store={store} data={data} entry={sheet.entry} preset={sheet.preset} onClose={() => setSheet(null)} />}
-      {data && sheet?.type === "balance" && <BalanceSheet store={store} data={data} today={today} onClose={() => setSheet(null)} />}
       {part && <PartSheet part={part} onClose={() => setPart(null)} onRow={openPartRow} />}
       <Toaster />
     </>

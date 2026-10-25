@@ -288,3 +288,6 @@ button.row:not(:disabled):active, .row[role=button]:active, button.crow:active, 
 
 /* iPhone は 16px より小さい入力欄を押すと画面を拡大し、そのまま戻らない。入力欄の文字は 16px にする */
 input, select, textarea { font-size: 16px; }
+/* 入力の画面の「出金・入金・残高・計画」：横いっぱいに4つ並べる */
+.seg4 { display: grid; grid-template-columns: repeat(4, 1fr); }
+.seg4 button { padding: 10px 0; font-size: 15px; font-weight: 700; text-align: center; }

@@ -62,13 +62,15 @@ export function Sheet({ title, onClose, onBack, children }: { title: string; onC
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+/** 入力欄と名前。ボタンを並べたもの（group）は label で包まない（label の中を押すと、最初のボタンが押されてしまうため） */
+export function Field({ label, hint, group, children }: { label: string; hint?: string; group?: boolean; children: ReactNode }) {
+  const Tag = group ? "div" : "label";
   return (
-    <label className="field">
+    <Tag className="field">
       <span className="flabel">{label}</span>
       {children}
       {hint && <span className="note">{hint}</span>}
-    </label>
+    </Tag>
   );
 }
 

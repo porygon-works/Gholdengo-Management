@@ -17,7 +17,7 @@ import { Chip, Field, md, money, NumInput, Select, Sheet, signed, toast, yen, ym
 type Tab = "budget" | "income" | "recurring" | "rules" | "kinds" | "assets" | "data";
 const TABS: [Tab, string][] = [["budget", "予算"], ["income", "給与・賞与"], ["recurring", "定期"], ["rules", "お店のルール"], ["kinds", "区分"], ["assets", "口座とカード"], ["data", "データ"]];
 
-export function SettingsView({ store, data, month, onOpen }: { store: Store; data: AppData; month: string; onOpen: (o: Open) => void }) {
+export function SettingsView({ store, data, month, onOpen, onInput }: { store: Store; data: AppData; month: string; onOpen: (o: Open) => void; onInput: () => void }) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem("gholdengo.settab") as Tab) || "budget"; } catch { return "budget"; } });
   useEffect(() => { try { localStorage.setItem("gholdengo.settab", tab); } catch { /* なし */ } }, [tab]);
   return (
@@ -28,7 +28,7 @@ export function SettingsView({ store, data, month, onOpen }: { store: Store; dat
         </div>
       </section>
       {tab === "budget" && <Budgets store={store} data={data} month={month} />}
-      {tab === "income" && <Income store={store} data={data} onOpen={onOpen} />}
+      {tab === "income" && <Income store={store} data={data} onOpen={onOpen} onInput={onInput} />}
       {tab === "recurring" && <RecurringList store={store} data={data} />}
       {tab === "rules" && <Rules store={store} data={data} />}
       {tab === "kinds" && <Kinds store={store} data={data} />}
@@ -121,19 +121,11 @@ function Budgets({ store, data, month }: { store: Store; data: AppData; month: s
 
 // ---------- 給与・賞与 ----------
 
-function Income({ store, data, onOpen }: { store: Store; data: AppData; onOpen: (o: Open) => void }) {
+function Income({ store, data, onOpen, onInput }: { store: Store; data: AppData; onOpen: (o: Open) => void; onInput: () => void }) {
   const today = todayJST();
   const incomeRec = data.recurring.filter((r) => r.kind === "income");
   const extras = data.accounts.filter((e) => e.direction === "in" && !e.recurring_id && e.date >= today.slice(0, 7)).sort((a, b) => a.date.localeCompare(b.date));
   const [edit, setEdit] = useState<Partial<Recurring> | null>(null);
-  const [bDate, setBDate] = useState("");
-  const [bAmount, setBAmount] = useState<number | "">("");
-  const [bName, setBName] = useState("賞与");
-  const [bGroup, setBGroup] = useState<AccountGroup>("bonus");
-  const addBonus = async () => {
-    if (!bDate || !bAmount) { toast("日付と金額を入れてください"); return; }
-    if (await store.run(() => actions.addAccount({ account: "bank", direction: "in", status: "plan", group: bGroup, category: null, name: bName, date: bDate, amount: bAmount }))) { toast("入金の予定を入れました"); setBDate(""); setBAmount(""); }
-  };
   return (
     <>
       <section>
@@ -143,15 +135,9 @@ function Income({ store, data, onOpen }: { store: Store; data: AppData; onOpen: 
         </div>
       </section>
       <section>
-        <h2>賞与・臨時入金</h2>
+        <div className="sec-h"><h2>賞与・臨時入金</h2><button className="btn sm" onClick={onInput}>入金入力</button></div>
         <div className="panel">
-          <div className="grid2">
-            <Field label="日付"><input type="date" value={bDate} onChange={(e) => setBDate(e.target.value)} /></Field>
-            <Field label="金額"><NumInput value={bAmount} onChange={setBAmount} /></Field>
-            <Field label="名称"><input value={bName} onChange={(e) => setBName(e.target.value)} /></Field>
-            <Field label="大費目"><Select value={bGroup} options={IN_GROUPS} labels={ACCOUNT_GROUP_LABEL} onChange={setBGroup} /></Field>
-          </div>
-          <div className="btns"><button className="btn" onClick={addBonus}>入金予定</button></div>
+          {!extras.length && <div className="note">なし</div>}
           {extras.length > 0 && <div className="list">{extras.map((e) => (
             <button className="row" key={e.id} onClick={() => onOpen({ type: "account", entry: e })}>
               <span className="d num">{md(e.date)}</span><span className="t"><div>{e.name || "入金"}</div><div>{ACCOUNT_GROUP_LABEL[e.group]}・{e.status === "plan" ? "予定" : "確定"}</div></span><span className="a num">＋{money(e.amount)}</span>

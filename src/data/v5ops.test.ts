@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { acc, card, S } from "../engine/fixture";
-import { atmRow, handover, handoverPatch, revolvingPatch, splitRows } from "./v5ops";
+import { atmRow, defaultStatus, handover, handoverPatch, incomeChange, revolvingPatch, spendChange, splitRows } from "./v5ops";
 
 // v5 の明細の操作（設計書 §3.4・§3.6）。値はすべて作り物
 describe("リボに回す", () => {
@@ -44,5 +44,30 @@ describe("v4 から引き継ぐ", () => {
     expect(h.unlink.map((e) => e.id)).toEqual(["pc"]);
     expect(handoverPatch).toEqual({ plan_id: null, plan_role: null, budget_month: null });
     expect(handover([acc({ id: "keep" })])).toEqual({ remove: [], unlink: [] });
+  });
+});
+
+describe("入力の画面で保存する中身", () => {
+  it("予定か確定かの最初の値は日付で決める（先の日付なら予定）", () => {
+    expect(defaultStatus("2026-11-05", "2026-11-05")).toBe("confirmed");
+    expect(defaultStatus("2026-11-04", "2026-11-05")).toBe("confirmed");
+    expect(defaultStatus("2026-11-06", "2026-11-05")).toBe("plan");
+  });
+  const base = { cat: "外食", amount: 1200, date: "2026-11-05", name: "", status: "confirmed" as const, tatekae: 0, memo: "" };
+  it("出金：払い方がカードならクレカ明細、口座・PayPay は口座明細（費目から大費目を決める）", () => {
+    expect(spendChange(S, { ...base, pay: "card:smbc" })).toMatchObject({ kind: "addCard", entry: { card: "smbc", group: "variable", category: "外食", amount: 1200, status: "confirmed" } });
+    expect(spendChange(S, { ...base, pay: "bank", cat: "家賃" })).toMatchObject({ kind: "addAccount", entry: { account: "bank", direction: "out", group: "fixed", category: "家賃" } });
+    expect(spendChange(S, { ...base, pay: "paypay" })).toMatchObject({ kind: "addAccount", entry: { name: "PayPayチャージ", category: "外食" } });
+  });
+  it("出金：現金は ATM で引き出した額（費目「現金」）", () => {
+    expect(spendChange(S, { ...base, pay: "atm" })).toMatchObject({ kind: "addAccount", entry: { category: "現金", group: "variable", name: "ATMで引き出し", amount: 1200 } });
+  });
+  it("出金：カードで一部を立て替えたら立替額、全額なら大費目を立替にする", () => {
+    expect(spendChange(S, { ...base, pay: "card:smbc", tatekae: 500 })).toMatchObject({ kind: "addCard", entry: { group: "variable", tatekae: 500 } });
+    expect(spendChange(S, { ...base, pay: "card:smbc", tatekae: 1200 })).toMatchObject({ kind: "addCard", entry: { group: "tatekae", category: null, tatekae: 0 } });
+  });
+  it("入金：区分が違うだけで、同じ口座明細の入金", () => {
+    expect(incomeChange({ group: "bonus", amount: 250000, date: "2026-12-15", name: "", status: "plan" })).toMatchObject({ kind: "addAccount", entry: { account: "bank", direction: "in", group: "bonus", name: "賞与", status: "plan", category: null } });
+    expect(incomeChange({ group: "refund", amount: 3000, date: "2026-11-05", name: "飲み会", status: "confirmed" })).toMatchObject({ entry: { group: "refund", name: "飲み会" } });
   });
 });

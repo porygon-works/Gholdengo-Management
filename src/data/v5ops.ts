@@ -1,4 +1,4 @@
-import { groupOfCat, type AccountEntry, type CardEntry, type Settings } from "../engine";
+import { ACCOUNT_GROUP_LABEL, groupOfCat, type AccountEntry, type AccountGroup, type CardEntry, type Change, type Settings, type Status } from "../engine";
 
 // v5 の明細の操作で、保存する中身を決める部分（設計書 §3.4・§3.6）。保存は store.ts の actions5
 
@@ -34,3 +34,26 @@ export function handover(rows: AccountEntry[]): { remove: AccountEntry[]; unlink
 }
 
 export const handoverPatch = { plan_id: null, plan_role: null, budget_month: null } as const;
+
+// ---------- 入力の画面（設計書 §4.4） ----------
+
+/** 予定か確定かの最初の値：日付が今日か前なら確定、先なら予定（本人が切り替えられる） */
+export const defaultStatus = (date: string, today: string): Status => (date > today ? "plan" : "confirmed");
+
+const accountBase = { account: "bank" as const, memo: "", source: "manual" as const, source_ref: null, recurring_id: null, goal_id: null, card: null, pair_id: null, locked: true };
+
+/** 出金の入力：払い方（`card:ID`・`paypay`・`bank`・`atm`）から保存先を決める。現金は ATM で引き出した額（費目「現金」） */
+export function spendChange(s: Settings, x: { pay: string; cat: string; amount: number; date: string; name: string; status: Status; tatekae: number; memo: string }): Change {
+  const group = groupOfCat(s, x.cat);
+  if (x.pay.startsWith("card:")) {
+    const all = x.tatekae > 0 && x.tatekae >= x.amount;
+    return { kind: "addCard", entry: { card: x.pay.slice(5), status: x.status, date: x.date, amount: x.amount, group: all ? "tatekae" : group, category: all ? null : x.cat, name: x.name, shop: "", memo: x.memo, tatekae: all ? 0 : x.tatekae, source: "manual", source_ref: null, merged_into: null, not_dup: [], locked: x.status !== "plan", recurring_id: null, goal_id: null } };
+  }
+  if (x.pay === "atm") return { kind: "addAccount", entry: { ...accountBase, ...atmRow(x.date, x.amount), status: x.status, memo: x.memo } };
+  return { kind: "addAccount", entry: { ...accountBase, direction: "out", status: x.status, group, category: x.cat, name: x.name || (x.pay === "paypay" ? "PayPayチャージ" : ""), memo: x.memo, date: x.date, amount: x.amount } };
+}
+
+/** 入金の入力：給与・賞与・立替の返金・その他は区分が違うだけで、同じ口座明細の入金 */
+export function incomeChange(x: { group: AccountGroup; amount: number; date: string; name: string; status: Status }): Change {
+  return { kind: "addAccount", entry: { ...accountBase, direction: "in", status: x.status, group: x.group, category: null, name: x.name || ACCOUNT_GROUP_LABEL[x.group], date: x.date, amount: x.amount } };
+}
