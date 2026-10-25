@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { acc, card, S } from "../engine/fixture";
-import { atmRow, revolvingPatch, splitRows } from "./v5ops";
+import { atmRow, handover, handoverPatch, revolvingPatch, splitRows } from "./v5ops";
 
 // v5 の明細の操作（設計書 §3.4・§3.6）。値はすべて作り物
 describe("リボに回す", () => {
@@ -28,5 +28,21 @@ describe("口座明細を分ける", () => {
 describe("ATM で引き出す", () => {
   it("口座の出金・費目「現金」の1行（財布は持たない）", () => {
     expect(atmRow("2026-11-05", 10000)).toMatchObject({ account: "bank", direction: "out", status: "confirmed", group: "variable", category: "現金", amount: 10000, date: "2026-11-05", name: "ATMで引き出し" });
+  });
+});
+
+describe("v4 から引き継ぐ", () => {
+  it("v4 の計画の予定の行と、前の版の調整の行は消す。v4 の計画の確定した行は、計画とのつながりだけ外す", () => {
+    const rows = [
+      acc({ id: "keep", amount: 1000 }),
+      acc({ id: "pp", status: "plan", amount: 2000, plan_id: "v4p", plan_role: "pay" }),
+      acc({ id: "pc", status: "confirmed", amount: 3000, plan_id: "v4p", plan_role: "pay", budget_month: "2026-10" }),
+      acc({ id: "adj", direction: "in", group: "salary", amount: 4000, source: "migration", source_ref: "v2base:#給与:2026-10" }),
+    ];
+    const h = handover(rows);
+    expect(h.remove.map((e) => e.id)).toEqual(["pp", "adj"]);
+    expect(h.unlink.map((e) => e.id)).toEqual(["pc"]);
+    expect(handoverPatch).toEqual({ plan_id: null, plan_role: null, budget_month: null });
+    expect(handover([acc({ id: "keep" })])).toEqual({ remove: [], unlink: [] });
   });
 });

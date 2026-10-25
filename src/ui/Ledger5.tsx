@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { budgetView, isLive, ymOf, type AccountEntry, type CardEntry } from "../engine";
 import type { AppData } from "../data/store";
 import { ACCOUNT_GROUP_LABEL, CARD_GROUP_LABEL, Chip, Empty, md, money, ownCost, wday, yen } from "./common";
-import { AccountRow, CardRow } from "./Ledger";
+import { AccountRow, CardRow } from "./Rows";
 import type { Open } from "./Sheets";
 
 // v5 の明細（設計書 §4.2）：「クレカ明細｜口座明細」を切り替える。両方を同じ表に並べない

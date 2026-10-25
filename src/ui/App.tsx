@@ -13,7 +13,6 @@ import { AccountSheet, CardSheet, NewSheet, type Open } from "./Sheets";
 import { BalanceSheet } from "./Balance";
 import { Ledger5 } from "./Ledger5";
 import { Login } from "./Login";
-import { PlansView } from "./PlansView";
 import { VERSION_LABEL } from "./version";
 import { reviewCount, ReviewView } from "./Review";
 import { SettingsView } from "./Settings";
@@ -52,7 +51,6 @@ function Main() {
   const { data, error, loading } = store;
   const today = todayJST();
   const [screen, setScreen] = useState<Screen>(() => { try { const v = localStorage.getItem("gholdengo.screen") as Screen; return SCREENS.includes(v) ? v : "home"; } catch { return "home"; } });
-  const [planId, setPlanId] = useState<string | null>(null);
   const [month, setMonth] = useState(ymOf(today));
   const [menu, setMenu] = useState(false);
   const [sheet, setSheet] = useState<SheetState>(null);
@@ -62,13 +60,7 @@ function Main() {
   useEffect(() => { try { localStorage.setItem("gholdengo.screen", screen); } catch { /* なし */ } }, [screen]);
   const go = (s: Screen) => { setScreen(s); setMenu(false); window.scrollTo(0, 0); };
   const reviews = data ? reviewCount(data, today) : 0;
-  const openPlan = (id: string) => { setPlanId(id); go("plans"); };
-  // 計画の取引は、明細から開いても計画の中身で直す（額や確定は計画で決めるため）
-  const openEntry = (o: Open) => {
-    const pid = o.type === "account" ? o.entry?.plan_id : null;
-    if (pid && data?.plans.some((p) => p.id === pid)) openPlan(pid);
-    else setSheet(o);
-  };
+  const openEntry = (o: Open) => setSheet(o);
   /** 内訳の行から明細を開く */
   const openPartRow = (r: PartRow) => {
     if (!data) return;
@@ -108,10 +100,7 @@ function Main() {
             }} />}
             {screen === "ledger" && <Ledger5 data={data} month={month} today={today} focusCat={focusCat} onOpen={openEntry} onAdd={() => setSheet({ type: "new" })} />}
             {screen === "flow" && <Outlook5 data={data} today={today} onOpen={openEntry} />}
-            {screen === "plans" && <>
-              <Plans5 store={store} data={data} today={today} openPart={setPart} />
-              <details className="panel"><summary>v4 の計画（切り替えまで、比べるために残す）</summary><PlansView store={store} data={data} today={today} openId={planId} setOpenId={setPlanId} /></details>
-            </>}
+            {screen === "plans" && <Plans5 store={store} data={data} today={today} openPart={setPart} />}
             {screen === "settings" && <SettingsView store={store} data={data} month={month} onOpen={openEntry} />}
             {screen === "review" && <ReviewView store={store} data={data} today={today} onOpen={openEntry} />}
           </main>
@@ -120,7 +109,7 @@ function Main() {
 
       <nav className="tabs" role="tablist">
         {(["home", "ledger", "flow", "plans", "settings"] as const).map((t) => (
-          <button key={t} role="tab" aria-selected={screen === t} onClick={() => { if (t === "ledger") setFocusCat(null); if (t === "plans") setPlanId(null); go(t); }}>
+          <button key={t} role="tab" aria-selected={screen === t} onClick={() => { if (t === "ledger") setFocusCat(null); go(t); }}>
             <svg viewBox="0 0 24 24">{ICONS[t]}</svg>{TAB_LABEL[t]}
           </button>
         ))}

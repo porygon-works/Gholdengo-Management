@@ -1,7 +1,7 @@
 import { findMerges, missingCardEntries, overduePlans, type CardEntry } from "../engine";
 import { actions, type AppData, type Store } from "../data/store";
 import { CARD_SOURCE_LABEL, cardTitle, Empty, md, STATUS_LABEL, toast, yen } from "./common";
-import { AccountRow } from "./Ledger";
+import { AccountRow } from "./Rows";
 import type { Open } from "./Sheets";
 
 const mailCards = (d: AppData) => d.cards.filter((e) => e.card === d.settings.cards[0].id);

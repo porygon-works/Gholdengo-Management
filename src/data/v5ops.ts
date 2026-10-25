@@ -21,3 +21,16 @@ export function splitRows(s: Settings, e: AccountEntry, parts: { category: strin
 export const atmRow = (date: string, amount: number) => ({
   account: "bank" as const, direction: "out" as const, status: "confirmed" as const, group: "variable" as const, category: "現金", name: "ATMで引き出し", memo: "", date, amount,
 });
+
+/**
+ * v4 から引き継ぐ（設計書 §7.3）：v4 の計画の予定の行と、前の版から移したときの調整の行（給与の調整・追加予算の調整）は消す。
+ * v4 の計画の確定した行は、普通の明細として残し、計画とのつながりだけ外す
+ */
+export function handover(rows: AccountEntry[]): { remove: AccountEntry[]; unlink: AccountEntry[] } {
+  return {
+    remove: rows.filter((e) => (e.plan_id && e.status === "plan") || e.source_ref?.startsWith("v2base:")),
+    unlink: rows.filter((e) => e.plan_id && e.status !== "plan" && !e.source_ref?.startsWith("v2base:")),
+  };
+}
+
+export const handoverPatch = { plan_id: null, plan_role: null, budget_month: null } as const;

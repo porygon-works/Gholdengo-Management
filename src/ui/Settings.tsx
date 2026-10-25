@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, computeMonth, GROUP_LABEL_DEFAULTS, groupOfCat, IN_GROUPS, monthBudget, RESERVE, todayJST,
+  ACCOUNT_GROUP_LABEL, budgetCats, CARD_GROUP_LABEL, budgetsFor, budgetView, GROUP_LABEL_DEFAULTS, groupOfCat, IN_GROUPS, monthBudget, RESERVE, todayJST,
   type AccountGroup, type CardDef, type CardGroup, type Recurring, type Settings as S,
 } from "../engine";
 import { actions, actions5, type AppData, type Store } from "../data/store";
@@ -10,6 +10,7 @@ import { VERSION_LABEL } from "./version";
 import { applyOps, OPS_FORMAT, planOps, simulateOps } from "../data/ops";
 import { slackValue } from "../engine";
 import { snapshot } from "../data/snapshot";
+import { handover } from "../data/v5ops";
 import type { Open } from "./Sheets";
 import { Chip, Field, md, money, NumInput, Select, Sheet, signed, toast, yen, ymLabel } from "./common";
 
@@ -73,9 +74,10 @@ function MonthBaseEditor({ store, data, month }: { store: Store; data: AppData; 
 function Budgets({ store, data, month }: { store: Store; data: AppData; month: string }) {
   const today = todayJST();
   const st = data.settings;
-  const v = computeMonth(data, month, today);
+  const bud = budgetsFor(data, month);
+  const v = budgetView(data, month, today);
   const cats = budgetCats(st).filter((c) => c !== RESERVE);
-  const init = () => Object.fromEntries(cats.map((c) => [c, v.cats.find((r) => r.cat === c)?.budget ?? 0])) as Record<string, number | "">;
+  const init = () => Object.fromEntries(cats.map((c) => [c, bud.get(c) ?? 0])) as Record<string, number | "">;
   const [vals, setVals] = useState(init);
   useEffect(() => setVals(init()), [month, data]); // eslint-disable-line react-hooks/exhaustive-deps
   const sumOf = (cs: string[]) => cs.reduce((a, c) => a + (Number(vals[c]) || 0), 0);
@@ -328,10 +330,10 @@ function Assets({ store, data }: { store: Store; data: AppData }) {
 
 // ---------- 区分 ----------
 
-const GROUP_KEYS = ["variable", "fixed", "tatekae", "purchase", "card", "other", "salary", "extra", "refund", "bonus"] as const;
+const GROUP_KEYS = ["variable", "fixed", "tatekae", "purchase", "card", "other", "salary", "refund", "bonus"] as const;
 const GROUP_WHERE: Record<(typeof GROUP_KEYS)[number], string> = {
   variable: "クレカ明細・口座明細の出金", fixed: "クレカ明細・口座明細の出金", tatekae: "クレカ明細・口座明細の出金",
-  purchase: "クレカ明細", card: "口座明細の出金（クレカの請求）", other: "口座明細の入金・出金", salary: "口座明細の入金", extra: "口座明細の入金", refund: "口座明細の入金", bonus: "口座明細の入金",
+  purchase: "クレカ明細", card: "口座明細の出金（クレカの請求）", other: "口座明細の入金・出金", salary: "口座明細の入金", refund: "口座明細の入金", bonus: "口座明細の入金",
 };
 
 /** 区分：費目（名前・大費目・追加・削除）と大費目の名前 */
@@ -473,6 +475,7 @@ function DataTab({ store, data }: { store: Store; data: AppData }) {
   };
   return (
     <>
+    <Handover store={store} data={data} />
     <OpsImport store={store} data={data} />
     <section>
       <h2>データ</h2>
@@ -498,5 +501,31 @@ function FilePick({ onFile }: { onFile: (f: File) => void }) {
       {name || "ファイル選択"}
       <input type="file" accept="application/json,.json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { setName(f.name); onFile(f); } e.target.value = ""; }} />
     </label>
+  );
+}
+
+/** v4 から引き継ぐ（設計書 §7.3）。することがあるときだけ出す。実行の前に、消す行とつながりを外す行の一覧を出す */
+function Handover({ store, data }: { store: Store; data: AppData }) {
+  const h = handover(data.accounts);
+  const n = h.remove.length + h.unlink.length;
+  if (!n) return null;
+  const run = async () => { if (confirm(`${n}件を引き継ぎますか？`) && (await store.run(() => actions5.handover(data)))) toast("引き継ぎました"); };
+  const list = (rows: typeof h.remove, what: string) => rows.length > 0 && (
+    <>
+      <h2>{what} <small>{rows.length}件</small></h2>
+      <div className="list">{rows.map((e) => (
+        <div key={e.id} className="row"><span className="d num">{md(e.date)}</span><span className="t"><div>{e.name || e.category || "―"}</div></span><span className="a num">{e.direction === "in" ? "＋" : "−"}{money(e.amount)}</span></div>
+      ))}</div>
+    </>
+  );
+  return (
+    <section>
+      <h2>v4 から引き継ぎ</h2>
+      <div className="panel">
+        {list(h.remove, "削除（v4 の計画の予定・前の版の調整）")}
+        {list(h.unlink, "計画とのつながりだけ外す（普通の明細として残す）")}
+        <div className="btns"><button className="btn" onClick={run}>引き継ぎ実行（{n}件）</button></div>
+      </div>
+    </section>
   );
 }

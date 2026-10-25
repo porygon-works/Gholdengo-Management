@@ -9,7 +9,7 @@ export type Direction = "in" | "out";
 /** 大費目。出金：変動費・固定費・立替・クレカ支払い・その他／入金：給与・追加予算・立替の返金・賞与・その他 */
 export type AccountGroup = "variable" | "fixed" | "tatekae" | "card" | "other" | "salary" | "extra" | "refund" | "bonus";
 export const OUT_GROUPS: AccountGroup[] = ["variable", "fixed", "tatekae", "card", "other"];
-export const IN_GROUPS: AccountGroup[] = ["salary", "extra", "refund", "bonus", "other"];
+export const IN_GROUPS: AccountGroup[] = ["salary", "refund", "bonus", "other"]; // 追加予算（extra）は v5 では使わない（前の版の行を読むためだけに型に残す）
 export type AccountSource = "manual" | "recurring" | "card_bill" | "goal" | "plan" | "migration";
 
 export interface AccountEntry {
@@ -148,8 +148,6 @@ export interface PlanDebt {
 }
 
 export type FundSource = "budget" | "bonus" | "spare";
-export const FUND_SOURCE_LABEL: Record<FundSource, string> = { budget: "予算から", bonus: "賞与から", spare: "予備から" };
-
 /** 確保額に入れる分。口座のお金は動かない（口座に残しておく額として数える） */
 export interface PlanFund {
   id: string;
